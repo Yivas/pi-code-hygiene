@@ -1,0 +1,17 @@
+{
+  "name": "pi-code-hygiene",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Run codehygiene on every file Pi writes or edits and report readability problems that linters miss.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package", "pi-extension", "codehygiene", "readability"],
+  "engines": { "node": ">=22.19.0" },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
+  "pi": { "extensions": ["./src/index.js"] },
+  "files": ["src/", "README.md", "LICENSE", "SECURITY.md"],
+  "scripts": {
+    "check": "node --check src/index.js && node --check test/index.test.js",
+    "test": "node --test test/*.test.js"
+  }
+}

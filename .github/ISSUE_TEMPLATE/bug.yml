@@ -1,0 +1,52 @@
+name: Bug report
+description: The extension filtered, ran or reported something wrongly.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. Remove credentials, session files, prompts, personal paths and unredacted logs before you paste anything. Report security vulnerabilities privately, as described in SECURITY.md. A scoring problem inside codehygiene itself belongs in the codehygiene issue tracker.
+  - type: input
+    id: version
+    attributes:
+      label: Package version or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Pi, Node.js and operating system versions
+      placeholder: Pi 1.5.2, Node.js 26.13.0, Windows 11
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options: ["shadow", "on", "off"]
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: The tool call, the file kind and what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: What happened
+      description: The note you saw, or the matching line from state/shadow.jsonl (it holds no code or paths).
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I removed credentials, personal paths, prompts and unredacted logs.
+          required: true
