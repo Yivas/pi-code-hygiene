@@ -1,15 +1,19 @@
 {
   "name": "pi-code-hygiene",
-  "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Run codehygiene on every file Pi writes or edits and report readability problems that linters miss.",
   "type": "module",
   "license": "MIT",
-  "keywords": ["pi-package", "pi-extension", "codehygiene", "readability"],
+  "author": "Yivas (https://github.com/Yivas)",
+  "homepage": "https://github.com/Yivas/pi-code-hygiene#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/Yivas/pi-code-hygiene.git" },
+  "bugs": { "url": "https://github.com/Yivas/pi-code-hygiene/issues" },
+  "keywords": ["pi-package", "pi-extension", "codehygiene", "readability", "code-quality"],
   "engines": { "node": ">=22.19.0" },
   "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
   "pi": { "extensions": ["./src/index.js"] },
   "files": ["src/", "README.md", "LICENSE", "SECURITY.md"],
+  "publishConfig": { "access": "public" },
   "scripts": {
     "check": "node --check src/index.js && node --check test/index.test.js",
     "test": "node --test test/*.test.js"

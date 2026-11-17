@@ -2,11 +2,11 @@
 
 A small Pi extension that runs [codehygiene](https://github.com/brianbell-x/codehygiene) on every file the agent writes or edits, so readability problems that linters miss show up without anyone having to remember to ask.
 
-[Install](#install) · [Modes](#modes) · [Limits](#limits-and-privacy) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+[Install](#install) · [Modes](#modes) · [Limits](#limits-and-privacy) · [Contributing](https://github.com/Yivas/pi-code-hygiene/blob/main/CONTRIBUTING.md) · [Security](https://github.com/Yivas/pi-code-hygiene/blob/main/SECURITY.md)
 
 codehygiene scores structure instead of syntax: pyramid nesting, comments that repeat the next line, swallowed errors, `*Factory` and `*Manager` ceremony, cryptic short names, magic indices and copy-pasted blocks. Its author recommends running it from a hook in the agent harness rather than as a skill. This package is that hook. It does not replace `pi-lsp`, type checkers or your project's linter, and it does not check behavior or security.
 
-Status: no release yet. The extension is checked with its own test suite and a real codehygiene install on Windows with Pi 1.5.2 and Node 26. Other platforms are untested. codehygiene is an early preview and its author documents false positives, so the extension starts in a mode that only measures.
+Status: version 0.1.0, the first release. It is checked on Windows with Node 26: its own test suite, and a run against a real codehygiene install. It targets the extension API of Pi 1.5.2. Other platforms are untested. codehygiene is an early preview and its author documents false positives, so the extension starts in a mode that only measures.
 
 ## Install
 
@@ -32,15 +32,14 @@ $files | ForEach-Object {
 
 Check that the `weights.npz` line starts with `72f35d4e48e128b8593ef831a804cd95e7e37dcb577ceca2f8985a35e29eb30b`. If you check out another commit, the manifest records whatever you installed; reading that code first is up to you. A hash detects accidental changes in that folder, not someone who can already write to it.
 
-Then add the extension from a local clone of this repository and reload Pi:
+Then install the extension and reload Pi:
 
 ```powershell
-git clone https://github.com/Yivas/pi-code-hygiene.git
-pi install .\pi-code-hygiene
+pi install npm:pi-code-hygiene@0.1.0
 # restart Pi, or run /reload
 ```
 
-Requirements: Node.js 22.19 or later and Pi with the `tool_result` extension event.
+Requirements: Node.js 22.19 or later and Pi with the `tool_result` extension event. To try unreleased changes, `pi install` also accepts the path of a local clone of the [repository](https://github.com/Yivas/pi-code-hygiene).
 
 ## Modes
 
@@ -74,6 +73,6 @@ Other settings: `PI_CODE_HYGIENE_HOME` moves the install folder and `PI_CODE_HYG
 
 ## Documentation and support
 
-Issues are welcome in [GitHub Issues](../../issues), pull requests as described in [CONTRIBUTING.md](CONTRIBUTING.md), and security reports through [SECURITY.md](SECURITY.md). No response time is promised. Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+Issues are welcome in [GitHub Issues](https://github.com/Yivas/pi-code-hygiene/issues), pull requests as described in [CONTRIBUTING.md](https://github.com/Yivas/pi-code-hygiene/blob/main/CONTRIBUTING.md), and security reports through [SECURITY.md](https://github.com/Yivas/pi-code-hygiene/blob/main/SECURITY.md). No response time is promised. Participation follows the [Code of Conduct](https://github.com/Yivas/pi-code-hygiene/blob/main/CODE_OF_CONDUCT.md). Changes between versions are listed in the [changelog](https://github.com/Yivas/pi-code-hygiene/blob/main/CHANGELOG.md).
 
-codehygiene is © Brian Bell and used under its MIT license; this package neither bundles nor redistributes it. This package is released under the [MIT License](LICENSE).
+codehygiene is a separate project by Brian Bell ([brianbell-x/codehygiene](https://github.com/brianbell-x/codehygiene)); this package neither bundles nor redistributes it. Its `pyproject.toml` declares the MIT license, but its repository has no `LICENSE` file, so read its terms before you rely on it. The commit this package expects is `0221af7` (codehygiene 0.5.0). This package is released under the [MIT License](https://github.com/Yivas/pi-code-hygiene/blob/main/LICENSE).

@@ -2,7 +2,11 @@
 
 ## Supported versions
 
-No release has been published yet. Until one is, only the latest commit on `main` is supported.
+| Version | Supported |
+|-|-|
+| 0.1.x | Yes |
+
+Older versions do not exist yet. Fixes go into the latest 0.1.x release.
 
 ## Scope
 
