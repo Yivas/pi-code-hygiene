@@ -1,0 +1,39 @@
+name: Upstream watch
+
+# Opens an issue when codehygiene's main branch moves past the commit in compat/codehygiene.json.
+# Triggers are only the weekly schedule and a manual run: nothing here runs for pull requests or
+# forks. GitHub disables scheduled workflows after 60 days without repository activity; a manual
+# run still works.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print what would be done and change nothing"
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # actions/checkout v7.0.1, pinned by commit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Compare upstream with the pin
+        run: bash scripts/upstream-watch.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}

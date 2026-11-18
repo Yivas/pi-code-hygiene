@@ -4,6 +4,12 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- A `fix` mode. It reports up to three findings in the code the agent wrote during the run, with a recipe for each, in two rounds per file: a note, then a final pass if the next edit touches a flagged line. It adds one fixed rule to the system prompt, only in this mode.
+- A weekly GitHub Actions workflow that opens an issue when codehygiene's `main` moves past the commit pinned in `compat/codehygiene.json`. It uses no third-party code beyond a commit-pinned `actions/checkout`, writes nothing but issues, and copies no upstream text into the issue.
+- Log fields to compare modes: findings in the edit, findings shown, why others were left out, the round, whether an edit was a re-check, and, against the previous analysis of the same file, how many were resolved, persisted or new.
+
 ## [0.1.0] - 2026-11-17
 
 First release.

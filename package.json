@@ -15,7 +15,7 @@
   "files": ["src/", "README.md", "LICENSE", "SECURITY.md"],
   "publishConfig": { "access": "public" },
   "scripts": {
-    "check": "node --check src/index.js && node --check test/index.test.js",
+    "check": "node --check src/index.js && node --check src/lines.js && node --check src/fix.js && node --check test/helpers.js && node --check test/index.test.js && node --check test/fix.test.js && node --check test/lines.test.js && node --check test/upstream-watch.test.js",
     "test": "node --test test/*.test.js"
   }
 }

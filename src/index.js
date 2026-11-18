@@ -2,16 +2,19 @@
 //
 // It hooks the public `tool_result` event. In "shadow" mode (the default) it only records
 // timings and counts and never touches the tool result. In "on" mode it waits for the analysis
-// and appends a short, non-imperative note to the result. It never marks a result as an error,
-// never asks the agent to continue, and fails silently: a broken install must not slow the
-// agent down or change what it sees.
+// and appends a short, non-imperative note to the result. "fix" is the assertive variant (see
+// fix.js): it reports only findings in the code the agent wrote in this run, with a recipe for each,
+// adds a short rule to the system prompt, and stops after two rounds per file. It never marks a
+// result as an error, never asks the agent to continue, and fails silently: a broken install
+// must not slow the agent down or change what it sees.
+//
 //
 // codehygiene itself (Python + numpy) is installed outside this package, under
 // $PI_CODE_HYGIENE_HOME (default %LOCALAPPDATA%/pi-hygiene):
 //   venv/             Python with numpy
 //   src/codehygiene/  checkout of brianbell-x/codehygiene, pinned to a commit
 //   manifest.sha256   hashes of the files that get loaded, in `sha256sum` format
-//   mode              optional: "shadow", "on" or "off"
+//   mode              optional: "shadow", "on", "fix" or "off"
 //   state/            shadow log and salt
 // PI_CODE_HYGIENE_MODE overrides the mode file; PI_CODE_HYGIENE_PYTHON overrides the interpreter.
 
@@ -19,6 +22,8 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { createFixTurn, FIX_GUIDELINE } from "./fix.js";
+import { fingerprint, splitLines } from "./lines.js";
 
 // Extensions the codehygiene README documents. Its source accepts a few more.
 const EXTENSIONS = new Set([
@@ -32,7 +37,7 @@ const KINDS = new Set([
   "deep_nesting", "poor_naming", "noisy_comment", "swallowed_error",
   "dense_line", "special_casing", "duplicate_block", "cramped_layout",
 ]);
-const MODES = new Set(["shadow", "on", "off"]);
+const MODES = new Set(["shadow", "on", "fix", "off"]);
 
 const THRESHOLD = 0.55;
 const MAX_FILE_BYTES = 200 * 1024;
@@ -55,6 +60,8 @@ export default function codeHygiene(pi) {
   const shutdown = new AbortController();
   const latestTicket = new Map();
   const lastNotice = new Map();
+  const previousFingerprints = new Map(); // file -> fingerprints of its last analysis
+  let fixTurn = createFixTurn(); // `fix` mode state; a new user prompt starts a new one
   let ticketCounter = 0;
   let installState; // undefined until first use, then "" (usable) or the reason it is not
 
@@ -63,28 +70,29 @@ export default function codeHygiene(pi) {
     return installState || undefined;
   }
 
-  // Resolves to the findings to show (possibly empty) and logs one record. If something
+  // Resolves to the text of the note to show ("" for none) and logs one record. If something
   // unexpected throws, the caller logs it instead.
-  async function analyze(file, base, ticket, cwd) {
+  async function analyze(file, base, ticket, cwd, wrote) {
     try {
       const skip = skipReason(file, cwd) ?? installProblem();
       if (skip) return skipped(base, skip);
 
-      const before = snapshot(file);
+      const before = snapshot(file, MAX_FILE_BYTES, true);
       if (!before) return skipped(base, "unreadable");
       const record = { ...base, bytes: before.bytes };
 
       // The time limit also covers waiting for a slot, so `on` mode never holds an edit longer.
       const queuedAt = performance.now();
       const release = await limiter.acquire().catch(() => undefined);
-      if (!release) return skipped(record, "busy");
+      if (!release) return dropped(record, "busy", file);
       try {
         if (shutdown.signal.aborted) return skipped(record, "shutdown");
-        // A later edit of the same file replaced this job while it waited; only the last one counts.
+        // A later edit of the same file replaced this job while it waited; only the last one counts,
+        // and it compares against the file as that edit left it.
         if (latestTicket.get(file) !== ticket) return skipped(record, "superseded");
         const startedAt = performance.now();
         const remaining = RUN_TIMEOUT_MS - (startedAt - queuedAt);
-        if (remaining < MIN_RUN_MS) return skipped(record, "busy");
+        if (remaining < MIN_RUN_MS) return dropped(record, "busy", file);
 
         // The path is absolute, so it cannot be read as an option, and pi.exec uses no shell.
         // -I ignores PYTHON* variables and the user site; -B writes no .pyc files.
@@ -97,14 +105,43 @@ export default function codeHygiene(pi) {
         // Findings describe the file as it was analyzed; if it changed meanwhile they are stale.
         const stale = snapshot(file)?.sha !== before.sha;
         const { findings, ...counts } = outcome;
+        const usable = counts.outcome === "ok" && !stale;
+
+        let note = "";
+        let stats = {};
+        if (counts.outcome === "ok") {
+          const lines = splitLines(before.text);
+          const fingerprints = new Set(findings.map((item) => fingerprint(item.kind, lines, item.line)).filter(Boolean));
+          // A stale analysis describes text that is no longer in the file: it joins no comparison.
+          if (!stale) {
+            stats = compare(previousFingerprints.get(file), fingerprints);
+            previousFingerprints.set(file, fingerprints);
+          }
+          if (usable && base.mode === "on") {
+            note = formatNote(findings.slice(0, MAX_FINDINGS_SHOWN));
+            stats.shown = note ? Math.min(findings.length, MAX_FINDINGS_SHOWN) : 0;
+          } else if (usable && base.mode === "fix") {
+            const review = fixTurn.review(file, lines, findings, { wrote });
+            note = review.text;
+            stats = { ...stats, ...review.stats, shown: review.findings.length, suppressed: review.suppressed };
+          } else if (base.mode === "fix") {
+            observeLater(file);
+          }
+        } else if (base.mode === "fix") {
+          // A failed analysis leaves the same problem: the edit happened anyway.
+          observeLater(file);
+        }
+        // "superseded" needs nothing: the newer edit of the same file is analyzed, and that
+        // analysis advances the comparison.
         log.write({
           ...record,
           ...counts,
+          ...stats,
           queue_ms: Math.round(startedAt - queuedAt),
           run_ms: Math.round(performance.now() - startedAt),
           stale,
         });
-        return counts.outcome === "ok" && !stale ? findings : [];
+        return note;
       } finally {
         release();
       }
@@ -113,10 +150,41 @@ export default function codeHygiene(pi) {
     }
   }
 
+  // The edit happened but its analysis cannot be used (the file changed while it ran, it failed,
+  // or no slot was free): the next comparison has to start from the file as it is now, or an
+  // unrelated edit would count as the re-check of a note it never answered.
+  function observeLater(file) {
+    const now = snapshot(file, MAX_FILE_BYTES, true);
+    if (now) fixTurn.observe(file, splitLines(now.text));
+  }
+
+  // An edit the extension decided not to analyze: no baseline was taken for it either, so there is
+  // nothing to compare against and nothing to record beyond the reason.
   function skipped(record, reason) {
     log.write({ ...record, outcome: "skipped", skip: reason });
-    return [];
+    return "";
   }
+
+  // An edit that was going to be analyzed and was dropped without one, for lack of capacity.
+  function dropped(record, reason, file) {
+    if (record.mode === "fix") observeLater(file);
+    return skipped(record, reason);
+  }
+
+  // Before an edit of a file in `fix` mode: remember the file as it is, so that later "the code you
+  // wrote" means the difference. A file that does not exist yet has no lines to compare against.
+  // Pi turns an error thrown here into a blocked tool call, so nothing may escape.
+  pi.on("tool_call", (event, ctx) => {
+    try {
+      if (event?.toolName !== "edit" && event?.toolName !== "write") return;
+      if (readMode(home) !== "fix") return;
+      const file = targetOf(event.input, ctx?.cwd);
+      if (!file || !EXTENSIONS.has(extname(file).toLowerCase()) || ignoredPath(file, ctx.cwd)) return;
+      fixTurn.begin(file, baselineOf(file));
+    } catch {
+      // No baseline means no notes for this file, never a failed edit.
+    }
+  });
 
   pi.on("tool_result", (event, ctx) => {
     if (event?.isError || (event?.toolName !== "edit" && event?.toolName !== "write")) return;
@@ -129,9 +197,9 @@ export default function codeHygiene(pi) {
     latestTicket.set(file, ticket);
     const base = { mode, tool: event.toolName, ext: extname(file).toLowerCase(), path: log.pseudonym(file) };
     const run = () =>
-      analyze(file, base, ticket, ctx.cwd).catch((error) => {
+      analyze(file, base, ticket, ctx.cwd, event.toolName === "write").catch((error) => {
         log.write({ ...base, outcome: "internal_error", error: error instanceof Error ? error.name : "unknown" });
-        return [];
+        return "";
       });
 
     // Shadow: defer all work so the hook returns before any file or process activity.
@@ -139,12 +207,24 @@ export default function codeHygiene(pi) {
       setImmediate(run);
       return;
     }
-    return run().then((findings) => {
-      const text = formatNote(findings);
-      if (!text || lastNotice.get(file) === text) return undefined;
+    return run().then((text) => {
+      // `on` skips a note identical to the last one for the file; `fix` tracks what it showed.
+      if (!text || (mode === "on" && lastNotice.get(file) === text)) return undefined;
       lastNotice.set(file, text);
       return { content: [...(event.content ?? []), { type: "text", text }] };
     });
+  });
+
+  // A run starts with a submitted prompt and gets fresh rounds and budgets. In `fix` mode the rule
+  // joins the system prompt, once, as the same constant text every time.
+  pi.on("before_agent_start", (event) => {
+    fixTurn = createFixTurn();
+    const options = event?.systemPromptOptions;
+    if (!options || readMode(home) !== "fix") return;
+    options.promptGuidelines ??= [];
+    if (Array.isArray(options.promptGuidelines) && !options.promptGuidelines.includes(FIX_GUIDELINE)) {
+      options.promptGuidelines.push(FIX_GUIDELINE);
+    }
   });
 
   pi.on("session_shutdown", () => shutdown.abort());
@@ -199,12 +279,18 @@ function targetOf(input, cwd) {
 
 // Only directories below the project count: a checkout that lives under a folder called
 // "build" or "dist" must still be analyzed. Windows paths ignore case.
-function skipReason(file, cwd) {
+function ignoredPath(file, cwd) {
   const inside = relative(cwd, file);
   const parts = (inside.startsWith("..") || isAbsolute(inside) ? file : inside).split(sep);
   if (parts.some((part) => IGNORED_DIRECTORIES.has(part.toLowerCase()))) return "ignored_dir";
   // codehygiene treats an argument with * ? [ as a glob and crashes on an absolute one.
   if (/[*?[]/.test(file)) return "glob_chars";
+  return undefined;
+}
+
+function skipReason(file, cwd) {
+  const ignored = ignoredPath(file, cwd);
+  if (ignored) return ignored;
   try {
     const stats = statSync(file);
     if (!stats.isFile()) return "not_file";
@@ -215,11 +301,13 @@ function skipReason(file, cwd) {
   return undefined;
 }
 
-function snapshot(file, maxBytes = MAX_FILE_BYTES) {
+// The text is kept only when asked for, to match findings with lines; it is never logged.
+function snapshot(file, maxBytes = MAX_FILE_BYTES, withText = false) {
   try {
     if (statSync(file).size > maxBytes) return undefined;
     const content = readFileSync(file);
-    return { sha: createHash("sha256").update(content).digest("hex"), bytes: content.length };
+    const sha = createHash("sha256").update(content).digest("hex");
+    return withText ? { sha, bytes: content.length, text: content.toString("utf8") } : { sha, bytes: content.length };
   } catch {
     return undefined;
   }
@@ -255,8 +343,28 @@ function describeRun(result, shuttingDown) {
     squiggles: parsed.squiggles.length,
     kinds,
     max_probability: findings[0]?.probability ?? 0,
-    findings: findings.slice(0, MAX_FINDINGS_SHOWN),
+    findings,
   };
+}
+
+// Counts for the log: against the previous analysis of the same file, how many findings were
+// resolved, persist or are new. Counts only.
+function compare(previous, current) {
+  if (!previous) return {};
+  const persisted = [...current].filter((fp) => previous.has(fp)).length;
+  return { resolved: previous.size - persisted, persisted, new_findings: current.size - persisted };
+}
+
+// The file's lines before an edit: null when it does not exist yet, undefined when it cannot be
+// read or is too large to analyze.
+function baselineOf(file) {
+  try {
+    const stats = statSync(file);
+    if (!stats.isFile() || stats.size > MAX_FILE_BYTES) return undefined;
+    return splitLines(readFileSync(file, "utf8"));
+  } catch (error) {
+    return error?.code === "ENOENT" ? null : undefined;
+  }
 }
 
 // Plain facts and no instruction to fix: codehygiene is a preview with known false positives.

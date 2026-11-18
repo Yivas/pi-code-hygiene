@@ -2,6 +2,8 @@
 
 A small Pi extension that runs [codehygiene](https://github.com/brianbell-x/codehygiene) on every file the agent writes or edits, so readability problems that linters miss show up without anyone having to remember to ask.
 
+> **Built on codehygiene, by Brian Bell.** The analysis, the model and the idea of running it from a hook are his work: [brianbell-x/codehygiene](https://github.com/brianbell-x/codehygiene). This package is an independent Pi integration and is not affiliated with or endorsed by him. It contains none of his code; it installs and calls his tool as a separate program.
+
 [Install](#install) · [Modes](#modes) · [Limits](#limits-and-privacy) · [Contributing](https://github.com/Yivas/pi-code-hygiene/blob/main/CONTRIBUTING.md) · [Security](https://github.com/Yivas/pi-code-hygiene/blob/main/SECURITY.md)
 
 codehygiene scores structure instead of syntax: pyramid nesting, comments that repeat the next line, swallowed errors, `*Factory` and `*Manager` ceremony, cryptic short names, magic indices and copy-pasted blocks. Its author recommends running it from a hook in the agent harness rather than as a skill. This package is that hook. It does not replace `pi-lsp`, type checkers or your project's linter, and it does not check behavior or security.
@@ -47,9 +49,10 @@ Requirements: Node.js 22.19 or later and Pi with the `tool_result` extension eve
 |-|-|
 | `shadow` (default) | Analyzes the file in the background and appends one line to `state/shadow.jsonl`. The tool result is not changed and nothing waits. |
 | `on` | Waits for the analysis (up to 3 s) and appends a short note with up to three findings of probability 0.55 or more. |
+| `fix` (unreleased) | Like `on`, but assertive and narrower: see [Fix mode](#fix-mode-unreleased). |
 | `off` | Does nothing. |
 
-Choose the mode with the `PI_CODE_HYGIENE_MODE` environment variable or by writing `shadow`, `on` or `off` to `%LOCALAPPDATA%\pi-hygiene\mode`. The file is read on every edit, so a change applies immediately. Without either, the mode is `shadow`; a mode file with any other text counts as `off`. In `on` mode a note looks like this:
+Choose the mode with the `PI_CODE_HYGIENE_MODE` environment variable or by writing `shadow`, `on`, `fix` or `off` to `%LOCALAPPDATA%\pi-hygiene\mode`. The file is read on every edit, so a change applies immediately. Without either, the mode is `shadow`; a mode file with any other text counts as `off`. In `on` mode a note looks like this:
 
 ```text
 [code-hygiene] Heuristic readability notes for this file (codehygiene preview; false positives are expected):
@@ -62,6 +65,34 @@ The note is information. The extension never marks an edit as failed, never asks
 
 Other settings: `PI_CODE_HYGIENE_HOME` moves the install folder and `PI_CODE_HYGIENE_PYTHON` points to another interpreter.
 
+### Fix mode (unreleased)
+
+`on` is information the agent can ignore, and agents mostly do. `fix` asks for action, with limits meant to keep it from chasing false positives:
+
+- It reports only findings in code the agent wrote during the current run (within one line of it). Before the agent's first edit of a file in a run, the extension keeps the file's lines in memory; "the code you wrote" is what the edit changed, worked out against that copy. A run starts with a submitted prompt. A message sent while the agent is still working joins the same run, so it does not reset the budgets; the next prompt sent while the agent is idle starts a new run. A file that does not exist yet counts as all written. A file it cannot read, that is over 200 KB, or that would be skipped anyway (`node_modules` and similar) is not reported, and neither is a file whose lines it could not keep.
+- It works in rounds per file, to follow the cycle codehygiene's author describes for agents: fix, re-check, stop after two passes. The first note opens a round. The next edit of that file that touches a flagged line (or a `write`) is the re-check, and what is still flagged by that edit is listed once more as the final pass. After that the file is silent for the rest of the agent run. Edits that touch nothing flagged can still bring notes about new findings, up to three notes per file.
+- A note lists at most three findings, best first, within 600 characters. They have probability 0.65 or more (0.75 for `poor_naming` and `special_casing`, the kinds most often wrong). `duplicate_block` is never reported: it needs both copies to be in the edit, and codehygiene gives one line.
+- Each finding comes with what usually fixes it, a fixed text of this package. Nothing from your code goes into a note.
+- A run gets at most eight notes or about 4,000 characters of them, as a cost limit, and it tracks the first 32 files it sees. With up to three findings and a recipe each, a note can reach 600 characters, so the third and weakest finding is dropped when it does not fit.
+- It adds one fixed rule to the system prompt, only in this mode: the user's requested scope and the project's linter come first, and untouched code is not to be edited to improve a score.
+
+```text
+[code-hygiene] Heuristic findings (they may be wrong) in lines you just changed:
+  line 10: swallowed_error (0.95) -> handle, log or rethrow; or comment why ignoring it is safe
+  line 11: deep_nesting (0.90) -> flatten with a guard clause or early return
+Fix only the real ones, in code you just wrote. Skip any fix that would change behavior, drop required
+error handling or clash with the project linter, and name what you skipped in one sentence.
+Do not edit untouched code to lower the score. (pass 1 of 2)
+```
+
+The limits are starting points, not measured values. Compare `fix` with `on` on your own work before you keep it. Every record says the mode, the tool, the file id and the outcome, and some carry more:
+
+- An analysis that produced a result records the score and counts, how many findings the file had, and how long the wait and the run took. If the same file was analyzed earlier in the session and the file did not change in the meantime, it also says how many findings were resolved, persisted or new.
+- When a note is shown, `on` and `fix` say how many findings it carried. A `fix` record may also carry the round, whether the edit was a re-check of an earlier note, how many flagged findings were resolved or persisted, and a count per reason for the findings it held back: `outside_edit`, `threshold`, `excluded`, `repeated`, `cap`, `rounds`, `file_cap`, `run_cap` or `no_baseline`.
+- A record of something that produced no result carries the reason it was skipped, or the error, plus the exit code when the process returned one.
+
+The field names are in `src/index.js`, where the record is written. What the note says is never logged, and neither is any text or hash of your code.
+
 ## Limits and privacy
 
 - It sees edits made through Pi's `edit` and `write` tools. Changes made by `bash`, by an editor, or by a subagent that does not load the extension are not analyzed.
@@ -69,7 +100,12 @@ Other settings: `PI_CODE_HYGIENE_HOME` moves the install folder and `PI_CODE_HYG
 - At most two analyses run at once and at most eight wait; the rest are skipped. The 3 s limit counts the wait for a free slot, so an edit is never held longer than that. A newer edit of the same file replaces the pending analysis. A file that changes while it is being analyzed produces no note.
 - Each analysis starts a Python process and takes about 0.35 s on the development machine (Windows, Python 3.11, numpy 2.5.5). In `on` mode that time is added to the edit.
 - Everything is local. The extension makes no network requests and codehygiene runs with `--no-update-check`. The log holds counts, timings and a salted hash of the path: no code, no paths and no text from the findings.
-- codehygiene scores the whole file, not the lines you changed, so older problems can show up after a small edit.
+- codehygiene scores the whole file, not the lines you changed, so older problems can show up after a small edit in `shadow` and `on`. `fix` filters them out.
+- The score is sensitive: a small harmless edit can move a file's score a lot, and the findings are heuristic. In `fix` mode an agent can still act on a wrong finding; the notes tell it to skip fixes that change behavior.
+
+## Keeping up with codehygiene
+
+codehygiene publishes no releases or tags, only commits on its `main` branch, so this repository pins one commit in [`compat/codehygiene.json`](https://github.com/Yivas/pi-code-hygiene/blob/main/compat/codehygiene.json). A weekly GitHub Actions workflow ([`upstream-watch.yml`](https://github.com/Yivas/pi-code-hygiene/blob/main/.github/workflows/upstream-watch.yml)) compares that commit with upstream `main` and opens one issue when they differ. The issue holds only checked facts: both commits, the date, how many commits apart they are, whether `weights.npz` changed, and whether upstream was archived or renamed. Nothing from upstream's text goes into it. Moving the pin is a decision made by hand; closing the issue declines that commit. The workflow can also be run manually, and GitHub pauses scheduled workflows after 60 days without repository activity.
 
 ## Documentation and support
 
