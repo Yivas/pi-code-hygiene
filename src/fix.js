@@ -17,6 +17,14 @@
 
 import { changedLines, fingerprint, isNear } from "./lines.js";
 
+function clampRounds(value) {
+  return Number.isInteger(value) && value >= 1 && value <= 4 ? value : FIX.maxRounds;
+}
+
+function clampFindings(value) {
+  return Number.isInteger(value) && value >= 1 && value <= 3 ? value : FIX.maxFindings;
+}
+
 export const FIX = {
   minProbability: 0.65,
   strictKinds: new Map([["poor_naming", 0.75], ["special_casing", 0.75]]),
@@ -58,7 +66,7 @@ export const FIX_GUIDELINE =
 const SILENT = Object.freeze({ findings: [], label: undefined, text: "" });
 
 // Plain note for the findings and the round. Findings are already limited in number.
-export function formatFixNote(findings, label) {
+export function formatFixNote(findings, label, maxRounds = FIX.maxRounds) {
   const lines = findings.map(
     (f) => `  line ${f.line}: ${f.kind} (${f.probability.toFixed(2)}) -> ${RECIPES[f.kind] ?? RECIPES.other}`,
   );
@@ -69,7 +77,7 @@ export function formatFixNote(findings, label) {
     "error handling or clash with the project linter, and name what you skipped in one sentence.",
     label === "final pass"
       ? "These remain after your last edit. Do not edit untouched code to lower the score. (final pass)"
-      : "Do not edit untouched code to lower the score. (pass 1 of 2)",
+      : `Do not edit untouched code to lower the score. (pass 1 of ${maxRounds})`,
   ].join("\n");
 }
 
@@ -95,8 +103,11 @@ export function createFixTurn() {
     },
 
     // Called after an edit with the file's lines and the findings (line, kind, probability, best
-    // first). Returns what to tell the agent, and counts for the log.
-    review(file, lines, findings, { wrote = false } = {}) {
+    // first). Returns what to tell the agent, and counts for the log. `limits` carries the values
+    // of the configuration snapshot taken for this call; without it the constants above apply.
+    review(file, lines, findings, { wrote = false, limits } = {}) {
+      const maxRounds = clampRounds(limits?.rounds);
+      const maxFindings = clampFindings(limits?.maxFindings);
       const state = files.get(file);
       if (!state || state.base === undefined) return { ...SILENT, suppressed: { no_baseline: findings.length } };
 
@@ -127,8 +138,8 @@ export function createFixTurn() {
 
       // A re-check is an edit that touched a flagged line, or removed a flagged finding.
       let pool = candidates;
-      let label = "pass 1 of 2";
-      if (state.round >= FIX.maxRounds) {
+      let label = `pass 1 of ${maxRounds}`;
+      if (state.round >= maxRounds) {
         count("rounds", candidates.length);
         return { ...SILENT, suppressed, stats };
       }
@@ -143,7 +154,7 @@ export function createFixTurn() {
         stats.resolved_flagged = resolved;
         stats.persisted_flagged = state.flagged.size - resolved;
         if (touched) {
-          state.round = FIX.maxRounds;
+          state.round = maxRounds;
           label = "final pass";
         } else {
           pool = candidates.filter((item) => !state.shown.has(item.fp));
@@ -161,11 +172,11 @@ export function createFixTurn() {
       }
 
       // As many findings as fit the note budget, best first, but at least one.
-      let picked = pool.slice(0, FIX.maxFindings);
-      let text = formatFixNote(picked, label);
+      let picked = pool.slice(0, maxFindings);
+      let text = formatFixNote(picked, label, maxRounds);
       while (picked.length > 1 && text.length > FIX.noteMaxChars) {
         picked = picked.slice(0, -1);
-        text = formatFixNote(picked, label);
+        text = formatFixNote(picked, label, maxRounds);
       }
       if (picked.length === 0) return { ...SILENT, suppressed, stats };
       count("cap", pool.length - picked.length);

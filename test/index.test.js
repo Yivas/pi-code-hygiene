@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
-import { rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import codeHygiene from "../src/index.js";
 import { report, setup, sha256, until } from "./helpers.js";
+
+const OWN = JSON.parse(readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8"));
 
 test("shadow mode records an analysis and leaves the tool result alone", async (t) => {
   const env = setup(t);
@@ -298,6 +301,173 @@ test("a file that changes during analysis produces no note", async (t) => {
   };
   assert.equal(await env.fire("edit", file), undefined);
   assert.equal(env.records().at(-1).stale, true);
+});
+
+test("every record names the version that wrote it", async (t) => {
+  const env = setup(t);
+  await env.fire("edit", env.write("a.py"));
+  const [record] = await until(() => env.records().filter((r) => r.outcome === "ok"), "a record");
+  assert.equal(record.v, OWN.version);
+});
+
+test("a session starts with one line saying which version runs and where the mode came from", async (t) => {
+  const env = setup(t, { mode: null, config: { mode: "fix", threshold: 0.7 } });
+  env.sessionStart("startup");
+  const [record] = await until(() => env.records().filter((r) => r.outcome === "session"), "the session record");
+  assert.equal(record.v, OWN.version);
+  assert.equal(record.mode, "fix");
+  assert.equal(record.mode_source, "config");
+  assert.equal(record.threshold, "0.70");
+  assert.equal(record.max_findings, 3);
+  assert.equal(record.rounds, 2);
+  assert.equal(record.reason, "startup");
+  assert.equal(record.disk_version, OWN.version);
+  assert.equal(record.stale, false);
+});
+
+test("the session line is written even with the mode off", async (t) => {
+  const env = setup(t, { mode: null, config: { mode: "off" } });
+  env.sessionStart("resume");
+  const [record] = await until(() => env.records().filter((r) => r.outcome === "session"), "the session record");
+  assert.equal(record.mode, "off");
+  assert.equal(record.reason, "resume");
+  assert.equal(record.mode_raw, "off");
+});
+
+test("the threshold in config.json is the one codehygiene gets", async (t) => {
+  const env = setup(t, { mode: null, config: { mode: "shadow", threshold: 0.4 } });
+  env.fire("edit", env.write("a.py"));
+  await until(() => env.calls.length === 1, "the analysis");
+  assert.equal(env.calls[0].args.at(-1), "0.40");
+});
+
+test("the fix rounds come from the configuration", async (t) => {
+  const env = setup(t, { mode: null, config: { mode: "fix", rounds: 1 } });
+  const file = env.write("a.py", "a = 1\n");
+  env.host.execImpl = async () => ({
+    stdout: report([{ line: 2, kind: "deep_nesting", probability: 0.9 }]),
+    stderr: "",
+    code: 0,
+  });
+  const first = await env.change(file, "a = 1\nb = 2\n");
+  assert.match(first.content.at(-1).text, /pass 1 of 1/);
+  const second = await env.change(file, "a = 1\nb = 2\nc = 3\n");
+  assert.equal(second, undefined);
+  assert.ok(env.records().some((r) => r.round_after === 1), "the round is recorded");
+});
+
+test("a mode change in the middle of a call does not reach that call", async (t) => {
+  const env = setup(t, { mode: null, config: { mode: "fix" } });
+  const file = env.write("a.py", "a = 1\n");
+  env.host.execImpl = async () => {
+    writeFileSync(join(env.home, "config.json"), JSON.stringify({ version: 1, mode: "on" }));
+    return { stdout: report([{ line: 2, kind: "deep_nesting", probability: 0.9 }]), stderr: "", code: 0 };
+  };
+  await env.change(file, "a = 1\nb = 2\n");
+  assert.equal(env.records().at(-1).mode, "fix");
+  await env.fire("edit", file);
+  assert.equal(env.records().at(-1).mode, "on");
+});
+
+test("the note limit in config.json applies to on mode", async (t) => {
+  const env = setup(t, { mode: null, config: { mode: "on", maxFindings: 1 } });
+  env.host.execImpl = async () => ({
+    stdout: report([
+      { line: 2, kind: "deep_nesting", probability: 0.9 },
+      { line: 3, kind: "noisy_comment", probability: 0.8 },
+    ]),
+    stderr: "",
+    code: 0,
+  });
+  const result = await env.fire("edit", env.write("a.py", "a = 1\n"));
+  const note = result.content.at(-1).text;
+  assert.equal(note.match(/^ {2}line /gm).length, 1);
+  assert.equal(env.records().at(-1).shown, 1);
+});
+
+test("a broken configuration never reaches the tool result", async (t) => {
+  const env = setup(t, {
+    mode: null,
+    config: { mode: "on", threshold: "oops\u0000", rounds: 99, surprise: "nonsense text" },
+  });
+  const result = await env.fire("edit", env.write("a.py"));
+  assert.match(result.content.at(-1).text, /code-hygiene/);
+  assert.ok(!result.content.some((part) => String(part.text).includes("oops")));
+  assert.ok(!result.content.some((part) => String(part.text).includes("nonsense")));
+  const warnings = env.records().filter((r) => r.outcome === "bad_config");
+  assert.equal(warnings.length, 2);
+  assert.deepEqual(
+    warnings.map((w) => w.setting),
+    ["threshold", "rounds"],
+  );
+});
+
+test("a session that starts after a shutdown works again on the same instance", async (t) => {
+  const env = setup(t);
+  env.sessionStart("startup");
+  env.shutdown();
+  env.sessionStart("new");
+  await env.fire("edit", env.write("a.py"));
+  const [record] = await until(() => env.records().filter((r) => r.outcome === "ok"), "an analysis");
+  assert.equal(record.mode, "shadow");
+});
+
+test("a warning is written once per session and armed again by the next one", async (t) => {
+  const env = setup(t, { mode: null, config: { mode: "on", threshold: 0.47 } });
+  await env.fire("edit", env.write("a.py"));
+  await until(() => env.records().some((r) => r.outcome === "bad_config"), "the first warning");
+  await env.fire("edit", env.write("b.py"));
+  assert.equal(env.records().filter((r) => r.outcome === "bad_config").length, 1);
+
+  env.sessionStart("new");
+  await env.fire("edit", env.write("c.py"));
+  await until(() => env.records().filter((r) => r.outcome === "bad_config").length === 2, "the second warning");
+});
+
+test("a mode written wrong in config.json leaves the mode off, not the default", async (t) => {
+  const env = setup(t, { mode: null, config: { mode: "loud" } });
+  await env.fire("edit", env.write("a.py"));
+  const [warning] = await until(() => env.records().filter((r) => r.outcome === "bad_mode"), "the warning");
+  assert.equal(warning.value, "loud");
+  // off means no analysis at all: the typo cannot start processes.
+  assert.equal(env.calls.length, 0);
+});
+
+test("a name clash while registering the command is recorded and does not break the load", async (t) => {
+  const env = setup(t);
+  const second = {
+    on: () => {},
+    exec: async () => ({ stdout: report([]), stderr: "", code: 0 }),
+    registerCommand: () => {
+      throw new Error("duplicate name");
+    },
+  };
+  codeHygiene(second);
+  const [record] = await until(() => env.records().filter((r) => r.outcome === "duplicate_command"), "the record");
+  assert.equal(record.v, OWN.version);
+});
+
+test("a second activation takes over and the first one goes quiet", async (t) => {
+  const env = setup(t);
+  const file = env.write("a.py");
+  await env.fire("edit", file);
+  const before = env.records().length;
+
+  const second = { on: () => {}, exec: async () => ({ stdout: report([]), stderr: "", code: 0 }), registerCommand: () => {} };
+  codeHygiene(second);
+  const [duplicate] = await until(() => env.records().filter((r) => r.outcome === "duplicate_load"), "the duplicate record");
+  assert.equal(duplicate.v, OWN.version);
+
+  await env.fire("edit", file);
+  assert.equal(env.records().length, before + 1);
+});
+
+test("after a clean shutdown a new activation registers without complaint", async (t) => {
+  const env = setup(t);
+  env.shutdown();
+  const second = { on: () => {}, exec: async () => ({ stdout: report([]), stderr: "", code: 0 }), registerCommand: () => {} };
+  codeHygiene(second);
+  assert.equal(env.records().filter((r) => r.outcome === "duplicate_load").length, 0);
 });
 
 test("shutdown aborts a running analysis and records it as aborted", async (t) => {
