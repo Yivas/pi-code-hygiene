@@ -18,7 +18,7 @@ The extension needs codehygiene installed outside the package: a Python environm
 $dir = Join-Path $env:LOCALAPPDATA "pi-hygiene"
 New-Item -ItemType Directory -Force $dir | Out-Null
 git clone https://github.com/brianbell-x/codehygiene.git "$dir\src"
-git -C "$dir\src" checkout 0221af718b51a56b6ee0fbea52f0bf42afa381bb
+git -C "$dir\src" checkout b97871bed1d678d2c95a442631c975b1264591fe
 uv venv "$dir\venv"
 uv pip install --python "$dir\venv\Scripts\python.exe" numpy==2.5.5
 
@@ -32,7 +32,7 @@ $files | ForEach-Object {
 } | Set-Content "$dir\manifest.sha256" -Encoding ascii
 ```
 
-Check that the `weights.npz` line starts with `72f35d4e48e128b8593ef831a804cd95e7e37dcb577ceca2f8985a35e29eb30b`. If you check out another commit, the manifest records whatever you installed; reading that code first is up to you. A hash detects accidental changes in that folder, not someone who can already write to it.
+Check that the `weights.npz` line starts with `579f85b8e48a65a7b4be894b699d4055bf3794ede5e68ecc72f4347832ee4f13`. If you check out another commit, the manifest records whatever you installed; reading that code first is up to you. A hash detects accidental changes in that folder, not someone who can already write to it.
 
 Then install the extension and reload Pi:
 
@@ -111,4 +111,4 @@ codehygiene publishes no releases or tags, only commits on its `main` branch, so
 
 Issues are welcome in [GitHub Issues](https://github.com/Yivas/pi-code-hygiene/issues), pull requests as described in [CONTRIBUTING.md](https://github.com/Yivas/pi-code-hygiene/blob/main/CONTRIBUTING.md), and security reports through [SECURITY.md](https://github.com/Yivas/pi-code-hygiene/blob/main/SECURITY.md). No response time is promised. Participation follows the [Code of Conduct](https://github.com/Yivas/pi-code-hygiene/blob/main/CODE_OF_CONDUCT.md). Changes between versions are listed in the [changelog](https://github.com/Yivas/pi-code-hygiene/blob/main/CHANGELOG.md).
 
-codehygiene is a separate project by Brian Bell ([brianbell-x/codehygiene](https://github.com/brianbell-x/codehygiene)); this package neither bundles nor redistributes it. Its `pyproject.toml` declares the MIT license, but its repository has no `LICENSE` file, so read its terms before you rely on it. The commit this package expects is `0221af7` (codehygiene 0.5.0). This package is released under the [MIT License](https://github.com/Yivas/pi-code-hygiene/blob/main/LICENSE).
+codehygiene is a separate project by Brian Bell ([brianbell-x/codehygiene](https://github.com/brianbell-x/codehygiene)); this package neither bundles nor redistributes it. Its `pyproject.toml` declares the MIT license, but its repository has no `LICENSE` file, so read its terms before you rely on it. The commit this package expects is `b97871b` (codehygiene 0.5.1). This package is released under the [MIT License](https://github.com/Yivas/pi-code-hygiene/blob/main/LICENSE).

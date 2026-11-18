@@ -31,7 +31,7 @@ const EXTENSIONS = new Set([
   ".cc", ".cpp", ".cxx", ".hpp", ".zig", ".java", ".cs", ".lua",
 ]);
 const IGNORED_DIRECTORIES = new Set(["node_modules", ".git", ".venv", "venv", "dist", "build", "target", "__pycache__"]);
-// The squiggle kinds codehygiene 0.5.0 can emit; anything else is reported as "other" so a
+// The squiggle kinds codehygiene 0.5.1 can emit; anything else is reported as "other" so a
 // future version cannot put free text into the log or the note.
 const KINDS = new Set([
   "deep_nesting", "poor_naming", "noisy_comment", "swallowed_error",

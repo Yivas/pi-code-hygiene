@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- The expected codehygiene commit is now `b97871b` (0.5.1) instead of `0221af7` (0.5.0). Upstream repaired false positives for Go, so the notes are quieter on code the previous pin used to flag. The files are the same, but `weights.npz` and `__init__.py` changed, so an installation made from the previous instructions keeps working and no longer matches the hashes this README prints until it is rebuilt at the new commit.
+
 ## [0.2.0] - 2026-11-18
 
 ### Added
@@ -24,5 +28,6 @@ First release.
 - A log of counts, timings and a salted hash of each path, with no code, paths or finding text.
 - Limits: two analyses at once and eight waiting, 3 s per file including the wait, 200 KB per file.
 
-[Unreleased]: https://github.com/Yivas/pi-code-hygiene/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Yivas/pi-code-hygiene/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Yivas/pi-code-hygiene/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Yivas/pi-code-hygiene/releases/tag/v0.1.0
