@@ -8,7 +8,7 @@ A small Pi extension that runs [codehygiene](https://github.com/brianbell-x/code
 
 codehygiene scores structure instead of syntax: pyramid nesting, comments that repeat the next line, swallowed errors, `*Factory` and `*Manager` ceremony, cryptic short names, magic indices and copy-pasted blocks. Its author recommends running it from a hook in the agent harness rather than as a skill. This package is that hook. It does not replace `pi-lsp`, type checkers or your project's linter, and it does not check behavior or security.
 
-Status: version 0.2.1. It is checked on Windows with Node 26: its own test suite, and a run against a real codehygiene install. It targets the extension API of Pi 1.5.2. Other platforms are untested. codehygiene is an early preview and its author documents false positives, so the extension starts in a mode that only measures.
+Status: version 0.2.1 is the published one; this branch adds a configuration file and the `/hygiene` command, listed as unreleased in the changelog. It is checked on Windows with Node 26: its own test suite, and runs against a real codehygiene install. It targets the extension API of Pi 1.5.2. Other platforms are untested. codehygiene is an early preview and its author documents false positives, so the extension starts in a mode that only measures.
 
 ## Install
 
@@ -38,8 +38,11 @@ Then install the extension and reload Pi:
 
 ```powershell
 pi install npm:pi-code-hygiene@0.2.1
-# restart Pi, or run /reload
 ```
+
+To check a working tree without installing it, `pi -ne -e <clone>/src/index.js` loads that file and nothing else; `/hygiene status` there shows the version it actually loaded.
+
+Then **restart Pi**, not `/reload`. A packaged extension is a `.js` module in a `"type": "module"` package, and the loader hands it to Node's native `import()`, whose registry is keyed by URL and never invalidated; `/reload` clears Pi's own cache and asks again, but the same URL returns the module already evaluated. Restarting the process is the only way to load a new version. `/hygiene` shows the version in memory and the one on disk, and says `STALE` when they differ.
 
 Requirements: Node.js 22.19 or later and Pi with the `tool_result` extension event. To try unreleased changes, `pi install` also accepts the path of a local clone of the [repository](https://github.com/Yivas/pi-code-hygiene).
 
@@ -52,9 +55,9 @@ Requirements: Node.js 22.19 or later and Pi with the `tool_result` extension eve
 | `fix` | Like `on`, but assertive and narrower: see [Fix mode](#fix-mode). |
 | `off` | Does nothing. |
 
-Choose the mode with the `PI_CODE_HYGIENE_MODE` environment variable or by writing `shadow`, `on`, `fix` or `off` to `%LOCALAPPDATA%\pi-hygiene\mode`.
+Choose the mode in `config.json` (`%LOCALAPPDATA%\pi-hygiene\config.json`), with `/hygiene`, or with the `PI_CODE_HYGIENE_MODE` environment variable. The plain `mode` file of earlier versions is still read; nothing writes it any more.
 
-The environment variable wins when it holds a mode name. Otherwise the file applies, read on every edit, so changing it takes effect at once; when neither holds a mode name and there is no file, the mode is `shadow`. Surrounding space and capital letters are ignored, and an empty value counts as unset. A value this version does not know never starts the mode it names and never overrides the other setting: if the environment variable is wrong, the file applies, and if the file is wrong, the mode is `off` unless the environment variable is valid. A value that was set but not understood is written once per session to the log as `bad_mode`, so a silent stop leaves a trace; it is recorded as "unprintable" unless it is a short printable string, and when both settings are wrong it is the environment one that is named. `fix` needs 0.2.0 or later: an older version ignores it and falls back to the mode file, or to `shadow` when there is none. In `on` mode a note looks like this:
+Each key is resolved on its own, in this order: the environment variable for the mode, then `config.json`, then the old `mode` file, then the default. `config.json` is read on every edit, so a change takes effect at once; when nothing holds a mode name the mode is `shadow`. A file that says something else is a typo, and a typo must not turn an intended `off` into running processes: when no source is valid and a file was there saying something else, the mode is `off`, while an unusable environment variable leaves the file or the default in charge, as before. Surrounding space and capital letters are ignored, and an empty value counts as unset. A value this version does not know never starts the mode it names and never overrides the other setting: if the environment variable is wrong, the file applies, and if the file is wrong, the mode is `off` unless the environment variable is valid. A value that was set but not understood is written once per session to the log as `bad_mode`, so a silent stop leaves a trace; it is recorded as "unprintable" unless it is a short printable string, and when both settings are wrong it is the environment one that is named. `fix` needs 0.2.0 or later: an older version ignores it and falls back to the mode file, or to `shadow` when there is none. In `on` mode a note looks like this:
 
 ```text
 [code-hygiene] Heuristic readability notes for this file (codehygiene preview; false positives are expected):
@@ -67,12 +70,51 @@ The note is information. The extension never marks an edit as failed, never asks
 
 Other settings: `PI_CODE_HYGIENE_HOME` moves the install folder and `PI_CODE_HYGIENE_PYTHON` points to another interpreter.
 
+## Settings and `/hygiene`
+
+`/hygiene` with no arguments opens a menu: the status line first, then status and diagnostics, mode, threshold and notes, installation, log, and reset. Every value is picked from a list, cancelling changes nothing, and the two actions that overwrite something ask first. With an argument it does that one thing and exits, which is what scripts and RPC clients use:
+
+```text
+/hygiene status
+/hygiene mode fix
+/hygiene set threshold 0.65
+/hygiene set rounds 2
+/hygiene check
+/hygiene reset --yes
+```
+
+Commands are dispatched by Pi in interactive and RPC modes. In `-p` and `--mode json` they are not dispatched at all, so the argument form is for RPC clients and interactive use.
+
+`config.json` holds these keys:
+
+| Key | Default | What it changes |
+|-|-|-|
+| `version` | `1` | Schema of this file, not of the package |
+| `mode` | `shadow` | What happens after each analysis |
+| `threshold` | `0.55` | Threshold passed to codehygiene, from 0.40 to 0.90 in steps of 0.05 |
+| `maxFindings` | `3` | Findings per note, in both `on` and `fix`, from 1 to 3 |
+| `rounds` | `2` | Rounds per file in `fix` mode, from 1 to 4; `1` is one note and then silence |
+
+```json
+{
+  "version": 1,
+  "mode": "on",
+  "threshold": 0.55,
+  "maxFindings": 3,
+  "rounds": 2
+}
+```
+
+A value that is present but not understood falls back to its own default and is reported once per session as `bad_config`, with the key and at most 16 printable characters of the value. An empty string counts as unset. An unreadable file is kept as `config.json.bad` before it is replaced. Unknown keys and a newer `version` are left alone. The menu is the only thing that writes the file, it says when a save failed, and it says when `PI_CODE_HYGIENE_MODE` will override the saved mode. The values are for this install, so they apply to every session and to any subagent that uses it.
+
+Only the global threshold is editable. The thresholds `fix` applies per kind (0.65, and 0.75 for `poor_naming` and `special_casing`) are constants of the package, and so are the 200 KB file limit, the 3 s time limit, two concurrent analyses and the note budgets.
+
 ### Fix mode
 
 `on` is information the agent can ignore, and agents mostly do. `fix` asks for action, with limits meant to keep it from chasing false positives. It is experimental: that it changes what an agent does is not measured, only that it shows the right findings. Its limits are starting points, not results of a trial.
 
 - It reports only findings in code the agent wrote during the current run (within one line of it). Before the agent's first edit of a file in a run, the extension keeps the file's lines in memory; "the code you wrote" is what the edit changed, worked out against that copy. A run starts with a submitted prompt. A message sent while the agent is still working joins the same run, so it does not reset the budgets; the next prompt sent while the agent is idle starts a new run. A file that does not exist yet counts as all written. A file it cannot read, that is over 200 KB, or that would be skipped anyway (`node_modules` and similar) is not reported, and neither is a file whose lines it could not keep.
-- It works in rounds per file, to follow the cycle codehygiene's author describes for agents: fix, re-check, stop after two passes. The first note opens a round. The next edit of that file that touches a flagged line (or a `write`) is the re-check, and what is still flagged by that edit is listed once more as the final pass. After that the file is silent for the rest of the agent run. Edits that touch nothing flagged can still bring notes about new findings, up to three notes per file.
+- It works in rounds per file, to follow the cycle codehygiene's author describes for agents: fix, re-check, stop. The first note opens a round. Two rounds is the default and `rounds` in `config.json` moves it from one to four; with one, the first note is the only one. The next edit of that file that touches a flagged line (or a `write`) is the re-check, and what is still flagged by that edit is listed once more as the final pass. After that the file is silent for the rest of the agent run. Edits that touch nothing flagged can still bring notes about new findings, up to three notes per file.
 - A note lists at most three findings, best first, within 600 characters. They have probability 0.65 or more (0.75 for `poor_naming` and `special_casing`, the kinds most often wrong). `duplicate_block` is never reported: it needs both copies to be in the edit, and codehygiene gives one line.
 - Each finding comes with what usually fixes it, a fixed text of this package. Nothing from your code goes into a note.
 - A run gets at most eight notes or about 4,000 characters of them, as a cost limit, and it tracks the first 32 files it sees. With up to three findings and a recipe each, a note can reach 600 characters, so the third and weakest finding is dropped when it does not fit.
@@ -87,7 +129,7 @@ error handling or clash with the project linter, and name what you skipped in on
 Do not edit untouched code to lower the score. (pass 1 of 2)
 ```
 
-The limits are starting points, not measured values. Compare `fix` with `on` on your own work before you keep it. A record of an analysis or of a skipped edit says the mode, the tool, the file id and the outcome; a record of a rejected mode value says that its outcome was `bad_mode`, plus the value. Some carry more:
+The limits are starting points, not measured values. Compare `fix` with `on` on your own work before you keep it. Every record says the version of the extension that wrote it (`v`), and each session starts with one record of its own: outcome `session`, the version in memory and the one on disk (`disk_version`), `stale`, the mode that applies, the text it came from (`mode_raw`), where it came from (`mode_source`), the threshold, the note limits, the schema of the configuration, and the moment the module was loaded. That line is written even in `off` mode, because it is how you tell that the extension is loaded at all. A record of an analysis or of a skipped edit says the mode, the tool, the file id and the outcome; a record of a rejected mode value says that its outcome was `bad_mode`, plus the value; a rejected setting is `bad_config`. Some carry more:
 
 - An analysis that produced a result records the score and counts, how many findings the file had, and how long the wait and the run took. If the same file was analyzed earlier in the session and the file did not change in the meantime, it also says how many findings were resolved, persisted or new.
 - When a note is shown, `on` and `fix` say how many findings it carried. A `fix` record may also carry the round, whether the edit was a re-check of an earlier note, how many flagged findings were resolved or persisted, and a count per reason for the findings it held back: `outside_edit`, `threshold`, `excluded`, `repeated`, `cap`, `rounds`, `file_cap`, `run_cap` or `no_baseline`.
@@ -101,7 +143,8 @@ The field names are in `src/index.js`, where the record is written. What the not
 - It analyzes files with the extensions codehygiene documents (`.py .ts .tsx .js .jsx .mjs .cjs .rs .go .c .h .cc .cpp .cxx .hpp .zig .java .cs .lua`), up to 200 KB, outside `node_modules`, `.git`, `.venv`, `venv`, `dist`, `build`, `target` and `__pycache__`. Paths containing `*`, `?` or `[` are skipped because codehygiene treats them as patterns.
 - At most two analyses run at once and at most eight wait; the rest are skipped. The 3 s limit counts the wait for a free slot, so an edit is never held longer than that. A newer edit of the same file replaces the pending analysis. A file that changes while it is being analyzed produces no note.
 - Each analysis starts a Python process and takes about 0.35 s on the development machine (Windows, Python 3.11, numpy 2.5.5). In `on` mode that time is added to the edit.
-- Everything is local. The extension makes no network requests and codehygiene runs with `--no-update-check`. The log holds counts, timings and a salted hash of the path: no code, no paths and no text from the findings. Once per session it may also hold a rejected mode value, at most 16 printable characters of the configuration, or the word `unprintable`.
+- Everything is local. The extension makes no network requests and codehygiene runs with `--no-update-check`. The log holds counts, timings, versions and a salted hash of the path: no code, no paths and no text from the findings. Once per session it may also hold a rejected value, at most 16 printable characters of the configuration, or the word `unprintable`. The log is rotated to `shadow.jsonl.1` when it passes 1 MiB, and truncated instead of renamed when another process holds it open.
+- `config.json` holds only the settings above. If it cannot be parsed it is copied to `config.json.bad` before a new one is written, so a file edited by hand is recoverable but stays in the install folder.
 - codehygiene scores the whole file, not the lines you changed, so older problems can show up after a small edit in `shadow` and `on`. `fix` filters them out.
 - The score is sensitive: a small harmless edit can move a file's score a lot, and the findings are heuristic. In `fix` mode an agent can still act on a wrong finding; the notes tell it to skip fixes that change behavior.
 

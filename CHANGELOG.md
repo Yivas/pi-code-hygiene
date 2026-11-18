@@ -4,6 +4,18 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- `/hygiene`, a command with a menu and an argument form: status, mode, threshold and note limits, a check of the installation, a summary of the log, and reset. It shows the version in memory next to the one on disk and says `STALE` when a restart is missing. Values are picked from lists, cancelling writes nothing, and reset and the install check ask first. It uses the dialog methods that also work in RPC, and it writes to the log instead of standard output when there is no UI.
+- `config.json` in the install folder, with `mode`, `threshold`, `maxFindings` and `rounds`. It is validated key by key, read on every edit, and written atomically with a retry; an unreadable file is kept as `config.json.bad` first. A value that is not understood falls back to its own default and is recorded once per session as `bad_config`.
+- Every log record now carries `v`, the version of the extension that wrote it, and each session starts with a `session` record: version in memory and on disk, `stale`, the mode that applies and where it came from, the threshold, the note limits and the moment the module was loaded. It is written even in `off` mode. A second copy of the extension loaded in the same process no longer registers a second set of hooks: the newest activation wins and the older one goes quiet, with a `duplicate_load` record.
+
+### Changed
+- The plain `mode` file of earlier versions is still read as the last source before the default, but nothing writes it any more; `config.json` is what the menu and the command write. Precedence is per key, and the mode keeps the behaviour it had: a file with a value this version does not know still leaves the mode at `off`, and an unusable `PI_CODE_HYGIENE_MODE` still leaves the file or the default in charge.
+- The first save through the menu or the command copies the legacy mode into `config.json`, so the file becomes the only source from then on and a later edit of the old file no longer changes anything.
+- The threshold passed to codehygiene, the number of findings per note and the rounds of `fix` come from the configuration instead of being constants. The thresholds `fix` applies per finding kind are still constants.
+- The README says that updating a packaged extension needs a restart of Pi: `/reload` clears Pi's own cache, but the module URL is the same and Node returns the copy it already evaluated.
+
 ## [0.2.1] - 2026-11-18
 
 ### Changed
