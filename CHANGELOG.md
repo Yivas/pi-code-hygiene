@@ -4,6 +4,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-18
+
 ### Added
 
 - A `fix` mode. It reports up to three findings in the code the agent wrote during the run, with a recipe for each, in two rounds per file: a note, then a final pass if the next edit touches a flagged line. It adds one fixed rule to the system prompt, only in this mode.

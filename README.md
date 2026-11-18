@@ -8,7 +8,7 @@ A small Pi extension that runs [codehygiene](https://github.com/brianbell-x/code
 
 codehygiene scores structure instead of syntax: pyramid nesting, comments that repeat the next line, swallowed errors, `*Factory` and `*Manager` ceremony, cryptic short names, magic indices and copy-pasted blocks. Its author recommends running it from a hook in the agent harness rather than as a skill. This package is that hook. It does not replace `pi-lsp`, type checkers or your project's linter, and it does not check behavior or security.
 
-Status: version 0.1.0, the first release. It is checked on Windows with Node 26: its own test suite, and a run against a real codehygiene install. It targets the extension API of Pi 1.5.2. Other platforms are untested. codehygiene is an early preview and its author documents false positives, so the extension starts in a mode that only measures.
+Status: version 0.2.0. It is checked on Windows with Node 26: its own test suite, and a run against a real codehygiene install. It targets the extension API of Pi 1.5.2. Other platforms are untested. codehygiene is an early preview and its author documents false positives, so the extension starts in a mode that only measures.
 
 ## Install
 
@@ -37,7 +37,7 @@ Check that the `weights.npz` line starts with `72f35d4e48e128b8593ef831a804cd95e
 Then install the extension and reload Pi:
 
 ```powershell
-pi install npm:pi-code-hygiene@0.1.0
+pi install npm:pi-code-hygiene@0.2.0
 # restart Pi, or run /reload
 ```
 
@@ -49,7 +49,7 @@ Requirements: Node.js 22.19 or later and Pi with the `tool_result` extension eve
 |-|-|
 | `shadow` (default) | Analyzes the file in the background and appends one line to `state/shadow.jsonl`. The tool result is not changed and nothing waits. |
 | `on` | Waits for the analysis (up to 3 s) and appends a short note with up to three findings of probability 0.55 or more. |
-| `fix` (unreleased) | Like `on`, but assertive and narrower: see [Fix mode](#fix-mode-unreleased). |
+| `fix` | Like `on`, but assertive and narrower: see [Fix mode](#fix-mode). |
 | `off` | Does nothing. |
 
 Choose the mode with the `PI_CODE_HYGIENE_MODE` environment variable or by writing `shadow`, `on`, `fix` or `off` to `%LOCALAPPDATA%\pi-hygiene\mode`. The file is read on every edit, so a change applies immediately. Without either, the mode is `shadow`; a mode file with any other text counts as `off`. In `on` mode a note looks like this:
@@ -65,7 +65,7 @@ The note is information. The extension never marks an edit as failed, never asks
 
 Other settings: `PI_CODE_HYGIENE_HOME` moves the install folder and `PI_CODE_HYGIENE_PYTHON` points to another interpreter.
 
-### Fix mode (unreleased)
+### Fix mode
 
 `on` is information the agent can ignore, and agents mostly do. `fix` asks for action, with limits meant to keep it from chasing false positives:
 
