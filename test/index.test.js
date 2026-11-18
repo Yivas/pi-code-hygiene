@@ -96,6 +96,77 @@ test("the mode file is read on every edit and a typo means off", async (t) => {
   await until(() => env.records().some((r) => r.mode === "shadow"), "a shadow record");
 });
 
+test("a mode written with space or capitals still works", async (t) => {
+  const env = setup(t);
+  delete process.env.PI_CODE_HYGIENE_MODE;
+  const modeFile = join(env.home, "mode");
+
+  let n = 0;
+  for (const text of ["On\n", "  on  ", "FIX\n"]) {
+    writeFileSync(modeFile, text);
+    const target = env.write(`m${++n}.py`);
+    if (text.toLowerCase().includes("fix")) assert.equal(await env.fire("edit", target), undefined);
+    else assert.ok(await env.fire("edit", target), text);
+    assert.equal(env.records().filter((r) => r.outcome === "bad_mode").length, 0, text);
+  }
+  assert.equal(env.records().at(-1).mode, "fix");
+
+  // The environment variable is read the same way.
+  writeFileSync(modeFile, "off\n");
+  process.env.PI_CODE_HYGIENE_MODE = " FIX ";
+  assert.equal(await env.fire("edit", env.write("env.py")), undefined); // no baseline was taken
+  assert.equal(env.records().at(-1).mode, "fix");
+  assert.equal(env.records().filter((r) => r.outcome === "bad_mode").length, 0);
+});
+
+test("a wrong value in one source is reported even when the other source is right", async (t) => {
+  const env = setup(t);
+  const modeFile = join(env.home, "mode");
+  const warnings = () => env.records().filter((r) => r.outcome === "bad_mode");
+
+  // Wrong file, right environment variable: the variable applies and the file is named.
+  writeFileSync(modeFile, "onn\n");
+  process.env.PI_CODE_HYGIENE_MODE = "on";
+  assert.ok(await env.fire("edit", env.write("a.py")));
+  assert.equal(env.records().at(-1).mode, "on");
+  await until(warnings, "the warning about the file");
+  assert.equal(warnings()[0].value, "onn");
+});
+
+test("an unknown mode value is never used and is recorded once, whatever it fell back to", async (t) => {
+  const env = setup(t);
+  const file = env.write("a.py");
+  const warnings = () => env.records().filter((r) => r.outcome === "bad_mode");
+
+  // No mode file at all: the default applies, and the rejected value is still named.
+  process.env.PI_CODE_HYGIENE_MODE = "loud";
+  await env.fire("edit", file);
+  await until(warnings, "the warning");
+  assert.equal(warnings()[0].value, "loud");
+  await until(() => env.records().some((r) => r.mode === "shadow"), "a shadow analysis");
+  assert.equal(env.calls.length, 1);
+
+  // A second unknown value in the same session is not reported again.
+  process.env.PI_CODE_HYGIENE_MODE = "louder";
+  env.fire("edit", file);
+  await until(() => env.records().length > 1, "another record");
+  assert.equal(warnings().length, 1);
+});
+
+test("a value that cannot be printed safely is recorded as unprintable, and an empty file is not a typo", async (t) => {
+  const env = setup(t);
+  const modeFile = join(env.home, "mode");
+  const warnings = () => env.records().filter((r) => r.outcome === "bad_mode");
+
+  writeFileSync(modeFile, ""); // an empty file, as a truncated write leaves it
+  process.env.PI_CODE_HYGIENE_MODE = `${'x'.repeat(40)}\u00df`;
+  await env.fire("edit", env.write("a.py"));
+  await until(warnings, "the warning");
+  assert.equal(warnings()[0].value, "unprintable");
+  await until(() => env.records().some((r) => r.mode === "shadow"), "a shadow analysis");
+  assert.ok(!env.logText().includes("xxxx"));
+});
+
 test("output over the buffer limit is not counted as a timeout", async (t) => {
   const env = setup(t, { mode: "on" });
   env.host.execImpl = async () => ({ stdout: "{", stderr: "", code: 1, killed: true, truncated: true });

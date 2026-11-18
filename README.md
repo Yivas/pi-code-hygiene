@@ -8,7 +8,7 @@ A small Pi extension that runs [codehygiene](https://github.com/brianbell-x/code
 
 codehygiene scores structure instead of syntax: pyramid nesting, comments that repeat the next line, swallowed errors, `*Factory` and `*Manager` ceremony, cryptic short names, magic indices and copy-pasted blocks. Its author recommends running it from a hook in the agent harness rather than as a skill. This package is that hook. It does not replace `pi-lsp`, type checkers or your project's linter, and it does not check behavior or security.
 
-Status: version 0.2.0. It is checked on Windows with Node 26: its own test suite, and a run against a real codehygiene install. It targets the extension API of Pi 1.5.2. Other platforms are untested. codehygiene is an early preview and its author documents false positives, so the extension starts in a mode that only measures.
+Status: version 0.2.1. It is checked on Windows with Node 26: its own test suite, and a run against a real codehygiene install. It targets the extension API of Pi 1.5.2. Other platforms are untested. codehygiene is an early preview and its author documents false positives, so the extension starts in a mode that only measures.
 
 ## Install
 
@@ -37,7 +37,7 @@ Check that the `weights.npz` line starts with `579f85b8e48a65a7b4be894b699d4055b
 Then install the extension and reload Pi:
 
 ```powershell
-pi install npm:pi-code-hygiene@0.2.0
+pi install npm:pi-code-hygiene@0.2.1
 # restart Pi, or run /reload
 ```
 
@@ -52,7 +52,9 @@ Requirements: Node.js 22.19 or later and Pi with the `tool_result` extension eve
 | `fix` | Like `on`, but assertive and narrower: see [Fix mode](#fix-mode). |
 | `off` | Does nothing. |
 
-Choose the mode with the `PI_CODE_HYGIENE_MODE` environment variable or by writing `shadow`, `on`, `fix` or `off` to `%LOCALAPPDATA%\pi-hygiene\mode`. The file is read on every edit, so a change applies immediately. Without either, the mode is `shadow`; a mode file with any other text counts as `off`. In `on` mode a note looks like this:
+Choose the mode with the `PI_CODE_HYGIENE_MODE` environment variable or by writing `shadow`, `on`, `fix` or `off` to `%LOCALAPPDATA%\pi-hygiene\mode`.
+
+The environment variable wins when it holds a mode name. Otherwise the file applies, read on every edit, so changing it takes effect at once; when neither holds a mode name and there is no file, the mode is `shadow`. Surrounding space and capital letters are ignored, and an empty value counts as unset. A value this version does not know never starts the mode it names and never overrides the other setting: if the environment variable is wrong, the file applies, and if the file is wrong, the mode is `off` unless the environment variable is valid. A value that was set but not understood is written once per session to the log as `bad_mode`, so a silent stop leaves a trace; it is recorded as "unprintable" unless it is a short printable string, and when both settings are wrong it is the environment one that is named. `fix` needs 0.2.0 or later: an older version ignores it and falls back to the mode file, or to `shadow` when there is none. In `on` mode a note looks like this:
 
 ```text
 [code-hygiene] Heuristic readability notes for this file (codehygiene preview; false positives are expected):
@@ -67,7 +69,7 @@ Other settings: `PI_CODE_HYGIENE_HOME` moves the install folder and `PI_CODE_HYG
 
 ### Fix mode
 
-`on` is information the agent can ignore, and agents mostly do. `fix` asks for action, with limits meant to keep it from chasing false positives:
+`on` is information the agent can ignore, and agents mostly do. `fix` asks for action, with limits meant to keep it from chasing false positives. It is experimental: that it changes what an agent does is not measured, only that it shows the right findings. Its limits are starting points, not results of a trial.
 
 - It reports only findings in code the agent wrote during the current run (within one line of it). Before the agent's first edit of a file in a run, the extension keeps the file's lines in memory; "the code you wrote" is what the edit changed, worked out against that copy. A run starts with a submitted prompt. A message sent while the agent is still working joins the same run, so it does not reset the budgets; the next prompt sent while the agent is idle starts a new run. A file that does not exist yet counts as all written. A file it cannot read, that is over 200 KB, or that would be skipped anyway (`node_modules` and similar) is not reported, and neither is a file whose lines it could not keep.
 - It works in rounds per file, to follow the cycle codehygiene's author describes for agents: fix, re-check, stop after two passes. The first note opens a round. The next edit of that file that touches a flagged line (or a `write`) is the re-check, and what is still flagged by that edit is listed once more as the final pass. After that the file is silent for the rest of the agent run. Edits that touch nothing flagged can still bring notes about new findings, up to three notes per file.
@@ -85,7 +87,7 @@ error handling or clash with the project linter, and name what you skipped in on
 Do not edit untouched code to lower the score. (pass 1 of 2)
 ```
 
-The limits are starting points, not measured values. Compare `fix` with `on` on your own work before you keep it. Every record says the mode, the tool, the file id and the outcome, and some carry more:
+The limits are starting points, not measured values. Compare `fix` with `on` on your own work before you keep it. A record of an analysis or of a skipped edit says the mode, the tool, the file id and the outcome; a record of a rejected mode value says that its outcome was `bad_mode`, plus the value. Some carry more:
 
 - An analysis that produced a result records the score and counts, how many findings the file had, and how long the wait and the run took. If the same file was analyzed earlier in the session and the file did not change in the meantime, it also says how many findings were resolved, persisted or new.
 - When a note is shown, `on` and `fix` say how many findings it carried. A `fix` record may also carry the round, whether the edit was a re-check of an earlier note, how many flagged findings were resolved or persisted, and a count per reason for the findings it held back: `outside_edit`, `threshold`, `excluded`, `repeated`, `cap`, `rounds`, `file_cap`, `run_cap` or `no_baseline`.
@@ -99,7 +101,7 @@ The field names are in `src/index.js`, where the record is written. What the not
 - It analyzes files with the extensions codehygiene documents (`.py .ts .tsx .js .jsx .mjs .cjs .rs .go .c .h .cc .cpp .cxx .hpp .zig .java .cs .lua`), up to 200 KB, outside `node_modules`, `.git`, `.venv`, `venv`, `dist`, `build`, `target` and `__pycache__`. Paths containing `*`, `?` or `[` are skipped because codehygiene treats them as patterns.
 - At most two analyses run at once and at most eight wait; the rest are skipped. The 3 s limit counts the wait for a free slot, so an edit is never held longer than that. A newer edit of the same file replaces the pending analysis. A file that changes while it is being analyzed produces no note.
 - Each analysis starts a Python process and takes about 0.35 s on the development machine (Windows, Python 3.11, numpy 2.5.5). In `on` mode that time is added to the edit.
-- Everything is local. The extension makes no network requests and codehygiene runs with `--no-update-check`. The log holds counts, timings and a salted hash of the path: no code, no paths and no text from the findings.
+- Everything is local. The extension makes no network requests and codehygiene runs with `--no-update-check`. The log holds counts, timings and a salted hash of the path: no code, no paths and no text from the findings. Once per session it may also hold a rejected mode value, at most 16 printable characters of the configuration, or the word `unprintable`.
 - codehygiene scores the whole file, not the lines you changed, so older problems can show up after a small edit in `shadow` and `on`. `fix` filters them out.
 - The score is sensitive: a small harmless edit can move a file's score a lot, and the findings are heuristic. In `fix` mode an agent can still act on a wrong finding; the notes tell it to skip fixes that change behavior.
 

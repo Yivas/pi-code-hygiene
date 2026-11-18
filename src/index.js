@@ -63,6 +63,19 @@ export default function codeHygiene(pi) {
   const previousFingerprints = new Map(); // file -> fingerprints of its last analysis
   let fixTurn = createFixTurn(); // `fix` mode state; a new user prompt starts a new one
   let ticketCounter = 0;
+  let warnedMode = false; // a rejected mode value is recorded once per session
+
+  // The mode, and a one-time record when the configured value could not be understood. The
+  // record reaches the log only: saying it in the tool result would put harness configuration
+  // in front of the agent.
+  function mode() {
+    const { mode: current, rejected } = readMode(home);
+    if (rejected !== undefined && !warnedMode) {
+      warnedMode = true;
+      log.write({ outcome: "bad_mode", value: /^[\x20-\x7e]{1,16}$/.test(rejected) ? rejected : "unprintable" });
+    }
+    return current;
+  }
   let installState; // undefined until first use, then "" (usable) or the reason it is not
 
   function installProblem() {
@@ -177,7 +190,7 @@ export default function codeHygiene(pi) {
   pi.on("tool_call", (event, ctx) => {
     try {
       if (event?.toolName !== "edit" && event?.toolName !== "write") return;
-      if (readMode(home) !== "fix") return;
+      if (mode() !== "fix") return;
       const file = targetOf(event.input, ctx?.cwd);
       if (!file || !EXTENSIONS.has(extname(file).toLowerCase()) || ignoredPath(file, ctx.cwd)) return;
       fixTurn.begin(file, baselineOf(file));
@@ -188,14 +201,14 @@ export default function codeHygiene(pi) {
 
   pi.on("tool_result", (event, ctx) => {
     if (event?.isError || (event?.toolName !== "edit" && event?.toolName !== "write")) return;
-    const mode = readMode(home);
-    if (mode === "off") return;
+    const currentMode = mode();
+    if (currentMode === "off") return;
     const file = targetOf(event.input, ctx?.cwd);
     if (!file || !EXTENSIONS.has(extname(file).toLowerCase())) return;
 
     const ticket = ++ticketCounter;
     latestTicket.set(file, ticket);
-    const base = { mode, tool: event.toolName, ext: extname(file).toLowerCase(), path: log.pseudonym(file) };
+    const base = { mode: currentMode, tool: event.toolName, ext: extname(file).toLowerCase(), path: log.pseudonym(file) };
     const run = () =>
       analyze(file, base, ticket, ctx.cwd, event.toolName === "write").catch((error) => {
         log.write({ ...base, outcome: "internal_error", error: error instanceof Error ? error.name : "unknown" });
@@ -203,13 +216,13 @@ export default function codeHygiene(pi) {
       });
 
     // Shadow: defer all work so the hook returns before any file or process activity.
-    if (mode === "shadow") {
+    if (currentMode === "shadow") {
       setImmediate(run);
       return;
     }
     return run().then((text) => {
       // `on` skips a note identical to the last one for the file; `fix` tracks what it showed.
-      if (!text || (mode === "on" && lastNotice.get(file) === text)) return undefined;
+      if (!text || (currentMode === "on" && lastNotice.get(file) === text)) return undefined;
       lastNotice.set(file, text);
       return { content: [...(event.content ?? []), { type: "text", text }] };
     });
@@ -220,7 +233,7 @@ export default function codeHygiene(pi) {
   pi.on("before_agent_start", (event) => {
     fixTurn = createFixTurn();
     const options = event?.systemPromptOptions;
-    if (!options || readMode(home) !== "fix") return;
+    if (!options || mode() !== "fix") return;
     options.promptGuidelines ??= [];
     if (Array.isArray(options.promptGuidelines) && !options.promptGuidelines.includes(FIX_GUIDELINE)) {
       options.promptGuidelines.push(FIX_GUIDELINE);
@@ -232,17 +245,33 @@ export default function codeHygiene(pi) {
 
 // The environment variable wins when valid, then the mode file. A missing file means the
 // default, but a file that says something else means a typo, and a typo must not turn an
-// intended "off" into running processes.
+// intended "off" into running processes. Surrounding space and capital letters are forgiven,
+// because "Fix" and "fix\n" are how the file gets written by hand.
+//
+// Returns the mode, and the value when one was set but not understood, so the caller can say so
+// once. A rejected value never starts the mode it names: what applies instead is the next thing
+// that is valid, or "off" when the file is set but wrong too, or the default "shadow" when there
+// is no file at all. An empty value counts as not set.
 function readMode(home) {
-  const requested = process.env.PI_CODE_HYGIENE_MODE;
-  if (MODES.has(requested)) return requested;
-  let fromFile;
+  const requested = normalizeMode(process.env.PI_CODE_HYGIENE_MODE) || undefined;
+  let configured;
   try {
-    fromFile = readFileSync(join(home, "mode"), "utf8").trim();
+    configured = normalizeMode(readFileSync(join(home, "mode"), "utf8")) || undefined;
   } catch {
-    return "shadow";
+    configured = undefined;
   }
-  return MODES.has(fromFile) ? fromFile : "off";
+
+  const wanted = requested && MODES.has(requested) ? requested : undefined;
+  const found = configured && MODES.has(configured) ? configured : undefined;
+  const rejected = (wanted ? undefined : requested) ?? (found ? undefined : configured);
+  if (wanted) return { mode: wanted, rejected };
+  if (found) return { mode: found, rejected };
+  if (configured) return { mode: "off", rejected };
+  return { mode: "shadow", rejected };
+}
+
+function normalizeMode(value) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
 // Returns "" when codehygiene can be used, otherwise the reason it cannot. The manifest
