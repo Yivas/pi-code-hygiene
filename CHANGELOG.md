@@ -2,6 +2,13 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). While the version is `0.y.z`, a minor release can include breaking changes.
 
+## [Unreleased]
+
+### Changed
+
+- The `/hygiene` menu shows a short description next to every entry, in a second column, and the value in use next to the setting it belongs to, so an entry can be read without trying it. The column follows the terminal width, collapses to one line on a narrow one, and keeps working when a client has no terminal at all.
+- The app said nothing when the host answered with something that was not in the menu; now it says so and stays open, and a host that only answers nonsense closes the menu instead of looping.
+
 ## [0.3.0] - 2026-11-18
 
 ### Added

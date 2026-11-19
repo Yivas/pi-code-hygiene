@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createCommand } from "../src/command.js";
+import { createCommand, formatMenu, menuWidth, wrapLines } from "../src/command.js";
 import { DEFAULTS } from "../src/config.js";
 import { setup } from "./helpers.js";
 
@@ -44,12 +44,26 @@ function fakeDeps(overrides = {}) {
   return { deps, writes, logs };
 }
 
-function ui(answers = [], { notes } = {}) {
+// Scripted dialogs. Each answer is matched against the rendered lines by the prefix of its first
+// column, the way a person picks an entry: `Mode`, `on`, `Threshold`, `Reset to defaults`. An answer
+// that matches nothing is delivered as if the dialog had been cancelled, which also gives the
+// "unknown choice" case for free.
+function ui(answers = [], { notes, calls } = {}) {
   const queue = [...answers];
+  const match = (lines, wanted) =>
+    lines.find((line) => line === wanted || (line.startsWith(wanted) && line[wanted.length] === " "));
   return {
     hasUI: true,
     ui: {
-      select: async () => (queue.length > 0 ? queue.shift() : undefined),
+      select: async (title, lines) => {
+        calls?.push({ title, lines });
+        if (queue.length === 0) return undefined;
+        const wanted = queue.shift();
+        if (wanted === undefined) return undefined;
+        // An object with `raw` answers with something the menu never offered.
+        if (typeof wanted === "object") return wanted.raw;
+        return match(lines, String(wanted));
+      },
       confirm: async () => (queue.length > 0 ? queue.shift() : false),
       input: async () => (queue.length > 0 ? queue.shift() : undefined),
       notify: (text, level) => notes?.push({ text, level }),
@@ -152,7 +166,8 @@ test("the menu writes what was chosen and exits when asked", async () => {
   const notes = [];
   const { deps, writes } = fakeDeps();
   const command = createCommand(deps);
-  await command.handler("", ui(["Mode", "fix", "Exit"], { notes }));
+  await command.handler("", ui(["Mode:", "fix", "Exit"], { notes }));
+  assert.equal(writes.length, 1);
   assert.deepEqual(writes, [{ mode: "fix" }]);
 });
 
@@ -166,7 +181,7 @@ test("closing the menu writes nothing", async () => {
 test("the threshold submenu saves the value that was picked", async () => {
   const { deps, writes } = fakeDeps();
   const command = createCommand(deps);
-  await command.handler("", ui(["Threshold and notes", "Threshold 0.55", "0.65", "Back", "Exit"]));
+  await command.handler("", ui(["Threshold and notes", "Threshold:", "0.65", "Back", "Exit"]));
   assert.deepEqual(writes, [{ thresholdCents: 65 }]);
 });
 
@@ -229,7 +244,7 @@ test("a broken install is shown with the reason and what fixes it", async () => 
   const { deps } = fakeDeps({ installCheck: () => ({ ok: false, reason: "manifest_missing" }) });
   const command = createCommand(deps);
   await command.handler("status", ui([], { notes }));
-  assert.match(notes[0].text, /install: manifest_missing — regenerate manifest\.sha256/);
+  assert.match(notes[0].text, /install: manifest_missing - regenerate manifest\.sha256/);
 });
 
 test("check reports success and failure in plain words", async () => {
@@ -259,6 +274,193 @@ test("the log view lists the counts and the last lines", async () => {
   assert.match(notes[0].text, /2048 bytes, 3 records/);
   assert.match(notes[0].text, /ok 2, session 1/);
   assert.match(notes[0].text, /400ms/);
+});
+
+test("the menu keeps a second column and every line inside the width", () => {
+  const entries = [
+    { key: "a", label: "Mode: shadow", desc: "record counts only, change nothing" },
+    { key: "b", label: "Threshold and notes", desc: "0.55, 3/note, 2 rounds" },
+    { key: "c", label: "Exit", desc: "close the menu" },
+  ];
+  for (const width of [40, 44, 60, 78, 120]) {
+    const { lines, byLine } = formatMenu(entries, width);
+    assert.equal(lines.length, entries.length);
+    for (const line of lines) {
+      assert.ok(line.length <= width, `${line} fits ${width}`);
+      assert.ok(!line.includes("\t") && !line.includes("\n") && !line.includes("\u001b"));
+      assert.equal(line, line.trimEnd());
+    }
+    for (const entry of entries) {
+      assert.ok(lines.some((line) => byLine.get(line) === entry.key), `an action is reachable at ${width}`);
+    }
+  }
+});
+
+test("with room, every description starts at the same column", () => {
+  const entries = [
+    { key: "a", label: "Exit", desc: "close" },
+    { key: "b", label: "Threshold and notes", desc: "0.55" },
+  ];
+  const { lines } = formatMenu(entries, 78);
+  const starts = lines.map((line) => line.search(/ {2}\S/));
+  assert.equal(new Set(starts).size, 1);
+});
+
+test("a narrow terminal collapses the second column into one line", () => {
+  const { lines } = formatMenu([{ key: "x", label: "Threshold and notes", desc: "0.55" }], 40);
+  assert.equal(lines[0], "Threshold and notes - 0.55");
+});
+
+test("a status line wider than the terminal is wrapped, not left to the host", () => {
+  const header = "pi-code-hygiene 0.3.0 | mode shadow (default) | threshold 0.55 | findings 3";
+  const wrapped = wrapLines(header, 40).split("\n");
+  assert.ok(wrapped.length > 1);
+  for (const line of wrapped) assert.ok(line.length <= 40, line);
+  assert.equal(wrapped.join(" "), header);
+});
+
+test("a description that does not fit ends in three dots", () => {
+  const { lines } = formatMenu([{ key: "x", label: "Exit", desc: "a".repeat(200) }], 40);
+  assert.ok(lines[0].length <= 40);
+  assert.ok(lines[0].startsWith("Exit"));
+  assert.ok(lines[0].endsWith("..."));
+});
+
+test("two entries that would render the same keep different actions", () => {
+  const { lines, byLine } = formatMenu(
+    [
+      { key: "one", label: "Same", desc: "" },
+      { key: "two", label: "Same", desc: "" },
+    ],
+    64,
+  );
+  assert.notEqual(lines[0], lines[1]);
+  assert.equal(byLine.get(lines[0]), "one");
+  assert.equal(byLine.get(lines[1]), "two");
+});
+
+test("the menu width follows the terminal and stays in a sane range", () => {
+  assert.equal(menuWidth({ isTTY: true, columns: 40 }), 40);
+  assert.equal(menuWidth({ isTTY: true, columns: 60 }), 52);
+  assert.equal(menuWidth({ isTTY: true, columns: 200 }), 78);
+  assert.equal(menuWidth({ isTTY: false }), 72);
+  // A pseudo-terminal may say isTTY without a usable width.
+  assert.equal(menuWidth({ isTTY: true, columns: undefined }), 72);
+  assert.equal(menuWidth({ isTTY: true, columns: 0 }), 72);
+});
+
+test("text from outside is flattened so an entry stays one line", () => {
+  const { lines, byLine } = formatMenu(
+    [{ key: "install", label: "Installation", desc: "first line\nsecond\u001b[31m line" }],
+    72,
+  );
+  assert.equal(lines.length, 1);
+  assert.ok(!lines[0].includes("\n") && !lines[0].includes("\u001b"));
+  assert.equal(byLine.get(lines[0]), "install");
+});
+
+test("no two entries render the same line, at any width", () => {
+  const entries = [
+    { key: "a", label: "Status and diagnostics", desc: "version, install, log" },
+    { key: "b", label: "Status and diagnostics 2", desc: "version, install, log" },
+    { key: "c", label: "Installation", desc: "python missing: create the venv" },
+    { key: "d", label: "Exit", desc: "close the menu" },
+  ];
+  for (let width = 40; width <= 78; width++) {
+    const { lines } = formatMenu(entries, width);
+    assert.equal(new Set(lines).size, lines.length, `unique at ${width}`);
+  }
+});
+
+test("a truncated line still resolves to its own action", () => {
+  const { lines, byLine } = formatMenu(
+    [
+      { key: "long", label: "Threshold and notes", desc: "a".repeat(200) },
+      { key: "exit", label: "Exit", desc: "close the menu" },
+    ],
+    40,
+  );
+  assert.ok(lines[0].endsWith("..."));
+  assert.equal(byLine.get(lines[0]), "long");
+});
+
+test("the current value is marked in the label, where truncation cannot eat it", async () => {
+  const calls = [];
+  const { deps } = fakeDeps({
+    configuration: () => ({
+      values: { ...DEFAULTS, mode: "fix" },
+      sources: { mode: "config", thresholdCents: "default", maxFindings: "default", rounds: "default" },
+      rejected: [],
+      problems: [],
+      schema: 1,
+      schemaKnown: true,
+      rawMode: "fix",
+      legacy: undefined,
+      configMode: "fix",
+      exists: true,
+    }),
+  });
+  await createCommand(deps).handler("", ui(["Mode:", "Back", "Exit"], { calls }));
+  const submenu = calls.find((call) => call.title.startsWith("Mode:"));
+  assert.match(submenu.title, /\(\* is current\)/);
+  const current = submenu.lines.find((line) => line.startsWith("fix "));
+  assert.ok(current, "the current mode is listed");
+  assert.match(current, /^fix \*/);
+});
+
+test("a valid choice clears the count of stray answers", async () => {
+  const notes = [];
+  const { deps, writes } = fakeDeps();
+  // Two stray answers with a real choice in between: the menu stays open and warns twice.
+  await createCommand(deps).handler("", ui([{ raw: "x" }, "Log", { raw: "y" }, "Exit"], { notes }));
+  assert.deepEqual(writes, []);
+  assert.equal(notes.filter((note) => /not one of the menu entries/.test(note.text)).length, 2);
+  assert.equal(notes.filter((note) => /closing it/.test(note.text)).length, 0);
+});
+
+test("an answer that is not in the menu warns and leaves the menu open", async () => {
+  const notes = [];
+  const { deps, writes } = fakeDeps();
+  const scripted = ui(["Exit"], { notes });
+  let first = true;
+  // The host answers with a string the menu never offered, then with a real entry: the menu warns
+  // once and stays open instead of treating the first answer as a cancel.
+  const strange = {
+    hasUI: true,
+    ui: {
+      ...scripted.ui,
+      select: async (title, lines) => {
+        if (first) {
+          first = false;
+          return "something else";
+        }
+        return scripted.ui.select(title, lines);
+      },
+    },
+  };
+  await createCommand(deps).handler("", strange);
+  assert.deepEqual(writes, []);
+  assert.equal(notes.length, 1);
+  assert.match(notes[0].text, /not one of the menu entries/);
+});
+
+test("a host that only answers with nonsense closes the menu instead of spinning", async () => {
+  const { deps, writes } = fakeDeps();
+  let asked = 0;
+  const stubborn = {
+    hasUI: true,
+    ui: {
+      select: async () => {
+        asked++;
+        return "something else";
+      },
+      confirm: async () => false,
+      notify: () => {},
+    },
+  };
+  await createCommand(deps).handler("", stubborn);
+  assert.equal(asked, 3);
+  assert.deepEqual(writes, []);
 });
 
 // The wiring in index.js, which is the part a fake deps object does not cover.
