@@ -8,7 +8,7 @@ A small Pi extension that runs [codehygiene](https://github.com/brianbell-x/code
 
 codehygiene scores structure instead of syntax: pyramid nesting, comments that repeat the next line, swallowed errors, `*Factory` and `*Manager` ceremony, cryptic short names, magic indices and copy-pasted blocks. Its author recommends running it from a hook in the agent harness rather than as a skill. This package is that hook. It does not replace `pi-lsp`, type checkers or your project's linter, and it does not check behavior or security.
 
-Status: version 0.2.1 is the published one; this branch adds a configuration file and the `/hygiene` command, listed as unreleased in the changelog. It is checked on Windows with Node 26: its own test suite, and runs against a real codehygiene install. It targets the extension API of Pi 1.5.2. Other platforms are untested. codehygiene is an early preview and its author documents false positives, so the extension starts in a mode that only measures.
+Status: version 0.3.0. It is checked on Windows with Node 26: its own test suite, and runs against a real codehygiene install. It targets the extension API of Pi 1.5.2. Other platforms are untested. codehygiene is an early preview and its author documents false positives, so the extension starts in a mode that only measures.
 
 ## Install
 
@@ -37,14 +37,14 @@ Check that the `weights.npz` line starts with `579f85b8e48a65a7b4be894b699d4055b
 Then install the extension and reload Pi:
 
 ```powershell
-pi install npm:pi-code-hygiene@0.2.1
+pi install npm:pi-code-hygiene@0.3.0
 ```
 
 To check a working tree without installing it, `pi -ne -e <clone>/src/index.js` loads that file and nothing else; `/hygiene status` there shows the version it actually loaded.
 
 Then **restart Pi**, not `/reload`. A packaged extension is a `.js` module in a `"type": "module"` package, and the loader hands it to Node's native `import()`, whose registry is keyed by URL and never invalidated; `/reload` clears Pi's own cache and asks again, but the same URL returns the module already evaluated. Restarting the process is the only way to load a new version. `/hygiene` shows the version in memory and the one on disk, and says `STALE` when they differ.
 
-Requirements: Node.js 22.19 or later and Pi with the `tool_result` extension event. To try unreleased changes, `pi install` also accepts the path of a local clone of the [repository](https://github.com/Yivas/pi-code-hygiene).
+Requirements: Node.js 22.19 or later and Pi with the `tool_result` extension event. `pi install` also accepts the path of a local clone of the [repository](https://github.com/Yivas/pi-code-hygiene).
 
 ## Modes
 

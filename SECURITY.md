@@ -4,9 +4,9 @@
 
 | Version | Supported |
 |-|-|
-| 0.2.x | Yes |
+| 0.3.x | Yes |
 
-Fixes go into the latest 0.2.x release. Older versions do not get fixes.
+Fixes go into the latest 0.3.x release. Older versions do not get fixes.
 
 ## Scope
 
