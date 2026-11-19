@@ -2,7 +2,7 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). While the version is `0.y.z`, a minor release can include breaking changes.
 
-## [Unreleased]
+## [0.3.1] - 2026-11-19
 
 ### Changed
 
@@ -52,6 +52,7 @@ First release.
 - A log of counts, timings and a salted hash of each path, with no code, paths or finding text.
 - Limits: two analyses at once and eight waiting, 3 s per file including the wait, 200 KB per file.
 
+[0.3.1]: https://github.com/Yivas/pi-code-hygiene/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Yivas/pi-code-hygiene/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Yivas/pi-code-hygiene/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Yivas/pi-code-hygiene/compare/v0.1.0...v0.2.0

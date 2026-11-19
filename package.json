@@ -1,6 +1,6 @@
 {
   "name": "pi-code-hygiene",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Run codehygiene on every file Pi writes or edits and report readability problems that linters miss.",
   "type": "module",
   "license": "MIT",

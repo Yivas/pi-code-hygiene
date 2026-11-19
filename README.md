@@ -8,7 +8,7 @@ A small Pi extension that runs [codehygiene](https://github.com/brianbell-x/code
 
 codehygiene scores structure instead of syntax: pyramid nesting, comments that repeat the next line, swallowed errors, `*Factory` and `*Manager` ceremony, cryptic short names, magic indices and copy-pasted blocks. Its author recommends running it from a hook in the agent harness rather than as a skill. This package is that hook. It does not replace `pi-lsp`, type checkers or your project's linter, and it does not check behavior or security.
 
-Status: version 0.3.0. It is checked on Windows with Node 26: its own test suite, and runs against a real codehygiene install. It targets the extension API of Pi 1.5.2. Other platforms are untested. codehygiene is an early preview and its author documents false positives, so the extension starts in a mode that only measures.
+Status: version 0.3.1. It is checked on Windows with Node 26: its own test suite, and runs against a real codehygiene install. It targets the extension API of Pi 1.5.2. Other platforms are untested. codehygiene is an early preview and its author documents false positives, so the extension starts in a mode that only measures.
 
 ## Install
 
@@ -37,7 +37,7 @@ Check that the `weights.npz` line starts with `579f85b8e48a65a7b4be894b699d4055b
 Then install the extension and reload Pi:
 
 ```powershell
-pi install npm:pi-code-hygiene@0.3.0
+pi install npm:pi-code-hygiene@0.3.1
 ```
 
 To check a working tree without installing it, `pi -ne -e <clone>/src/index.js` loads that file and nothing else; `/hygiene status` there shows the version it actually loaded.
