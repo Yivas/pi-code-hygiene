@@ -72,7 +72,7 @@ Other settings: `PI_CODE_HYGIENE_HOME` moves the install folder and `PI_CODE_HYG
 
 ## Settings and `/hygiene`
 
-`/hygiene` with no arguments opens a menu: the status line first, then status and diagnostics, mode, threshold and notes, installation, log, and reset. Every value is picked from a list, cancelling changes nothing, and the two actions that overwrite something ask first. With an argument it does that one thing and exits, which is what scripts and RPC clients use:
+`/hygiene` with no arguments opens a menu: the status line first, then status and diagnostics, mode, threshold and notes, installation, log, and reset. In the terminal it draws its own list: the entry under the cursor shows what it does on the same line, the others stay quiet, and escape closes the menu or goes back to it, so there is no row for that. Cancelling changes nothing, and the two actions that overwrite something ask first. With an argument it does that one thing and exits, which is what scripts and RPC clients use:
 
 ```text
 /hygiene status
@@ -83,7 +83,7 @@ Other settings: `PI_CODE_HYGIENE_HOME` moves the install folder and `PI_CODE_HYG
 /hygiene reset --yes
 ```
 
-Commands are dispatched by Pi in interactive and RPC modes. In `-p` and `--mode json` they are not dispatched at all, so the argument form is for RPC clients and interactive use.
+Commands are dispatched by Pi in interactive and RPC modes. In `-p` and `--mode json` they are not dispatched at all, so the argument form is for RPC clients and interactive use. An RPC client has no cursor, so there the menu is a plain list with the description on every line and a last row to close it or go back.
 
 `config.json` holds these keys:
 

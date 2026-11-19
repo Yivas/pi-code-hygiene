@@ -6,7 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Changed
 
-- The `/hygiene` menu shows a short description next to every entry, in a second column, and the value in use next to the setting it belongs to, so an entry can be read without trying it. The column follows the terminal width, collapses to one line on a narrow one, and keeps working when a client has no terminal at all.
+- The `/hygiene` menu draws its own list in the terminal: the entry under the cursor shows what it does on that same line, the rest show nothing, and escape closes the menu or goes back, so the row that said `Exit` is gone. The value in use sits next to the setting it belongs to, and the status line is wrapped to the width instead of left to the host.
+- Where there is no cursor to draw (an RPC client), the same entries are a plain list with the description on every line and one last row to close it, because such a client may have no other way out.
 - The app said nothing when the host answered with something that was not in the menu; now it says so and stays open, and a host that only answers nonsense closes the menu instead of looping.
 
 ## [0.3.0] - 2026-11-18

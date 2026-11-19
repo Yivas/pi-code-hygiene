@@ -166,7 +166,7 @@ test("the menu writes what was chosen and exits when asked", async () => {
   const notes = [];
   const { deps, writes } = fakeDeps();
   const command = createCommand(deps);
-  await command.handler("", ui(["Mode:", "fix", "Exit"], { notes }));
+  await command.handler("", ui(["Mode:", "fix", "Close"], { notes }));
   assert.equal(writes.length, 1);
   assert.deepEqual(writes, [{ mode: "fix" }]);
 });
@@ -181,7 +181,7 @@ test("closing the menu writes nothing", async () => {
 test("the threshold submenu saves the value that was picked", async () => {
   const { deps, writes } = fakeDeps();
   const command = createCommand(deps);
-  await command.handler("", ui(["Threshold and notes", "Threshold:", "0.65", "Back", "Exit"]));
+  await command.handler("", ui(["Threshold and notes", "Threshold:", "0.65", "Back", "Close"]));
   assert.deepEqual(writes, [{ thresholdCents: 65 }]);
 });
 
@@ -221,7 +221,7 @@ test("reset --yes works with no UI at all and records the action", async () => {
 test("reset from the menu does nothing when the confirmation is declined", async () => {
   const { deps, writes } = fakeDeps();
   const command = createCommand(deps);
-  await command.handler("", ui(["Reset to defaults", false, "Exit"]));
+  await command.handler("", ui(["Reset to defaults", false, "Close"]));
   assert.deepEqual(writes, []);
 });
 
@@ -270,10 +270,81 @@ test("the log view lists the counts and the last lines", async () => {
       tail: [{ ts: "2026-11-18T05:00:00.000Z", outcome: "ok", mode: "on", tool: "edit", run_ms: 400 }],
     }),
   });
-  await createCommand(deps).handler("", ui(["Log", "Exit"], { notes }));
+  await createCommand(deps).handler("", ui(["Log", "Close"], { notes }));
   assert.match(notes[0].text, /2048 bytes, 3 records/);
   assert.match(notes[0].text, /ok 2, session 1/);
   assert.match(notes[0].text, /400ms/);
+});
+
+// A terminal UI: `custom` is the only dialog used, and each invocation gets its own keys. When a
+// menu opens and no keys are queued for it, escape is pressed, so a test can never hang.
+function tuiUi({ keys = [], notes } = {}) {
+  const renders = [];
+  let call = 0;
+  const ctx = {
+    hasUI: true,
+    mode: "tui",
+    ui: {
+      custom: async (factory) => {
+        const mine = keys[call++] ?? ["tui.select.cancel"];
+        return new Promise((resolve) => {
+          const theme = { fg: (_colour, text) => text };
+          const keybindings = { matches: (data, id) => data === id };
+          const component = factory({ requestRender: () => {} }, theme, keybindings, (value) => resolve(value));
+          renders.push(component.render(78));
+          for (const key of mine) component.handleInput(key);
+        });
+      },
+      select: async () => {
+        throw new Error("select is not the terminal path");
+      },
+      confirm: async () => false,
+      notify: (text, level) => notes?.push({ text, level }),
+    },
+  };
+  return { ctx, renders };
+}
+
+test("the terminal menu draws its own header and rows, with no row to close it", async () => {
+  const { deps } = fakeDeps();
+  const { ctx, renders } = tuiUi();
+  await createCommand(deps).handler("", ctx);
+  const lines = renders[0];
+  assert.match(lines[0], /pi-code-hygiene 0\.3\.0 \| mode shadow/);
+  assert.ok(lines.some((line) => line.includes("Mode: shadow")));
+  assert.ok(lines.some((line) => line.includes("esc closes")));
+  assert.ok(!lines.some((line) => line.includes("Close")), "no row for closing");
+  assert.equal(lines.filter((line) => line.startsWith("> ")).length, 1);
+});
+
+test("escape in the terminal closes without changing anything", async () => {
+  const { deps, writes } = fakeDeps();
+  const { ctx } = tuiUi({ keys: [["tui.select.cancel"]] });
+  await createCommand(deps).handler("", ctx);
+  assert.deepEqual(writes, []);
+});
+
+test("moving down and confirming opens that entry", async () => {
+  const notes = [];
+  const { deps } = fakeDeps();
+  const { ctx, renders } = tuiUi({
+    keys: [["tui.select.down", "tui.select.down", "tui.select.confirm"], ["tui.select.cancel"]],
+    notes,
+  });
+  await createCommand(deps).handler("", ctx);
+  // Down twice: mode, limits, status. The third entry is the status panel.
+  assert.ok(notes.some((note) => /loaded at/.test(note.text)));
+  assert.ok(renders.length >= 2);
+});
+
+test("escape in a submenu comes back to the menu instead of closing it", async () => {
+  const { deps } = fakeDeps();
+  const { ctx, renders } = tuiUi({ keys: [["tui.select.confirm"], ["tui.select.cancel"], ["tui.select.cancel"]] });
+  await createCommand(deps).handler("", ctx);
+  // Main menu, the mode submenu, then the main menu again and closed.
+  assert.equal(renders.length, 3);
+  assert.match(renders[1][0], /Mode: what happens after every edit/);
+  assert.match(renders[2][0], /pi-code-hygiene/);
 });
 
 test("the menu keeps a second column and every line inside the width", () => {
@@ -400,9 +471,9 @@ test("the current value is marked in the label, where truncation cannot eat it",
       exists: true,
     }),
   });
-  await createCommand(deps).handler("", ui(["Mode:", "Back", "Exit"], { calls }));
+  await createCommand(deps).handler("", ui(["Mode:", "Esc", "Close"], { calls }));
   const submenu = calls.find((call) => call.title.startsWith("Mode:"));
-  assert.match(submenu.title, /\(\* is current\)/);
+  assert.match(submenu.title, /\(\*\) marks the value in use/);
   const current = submenu.lines.find((line) => line.startsWith("fix "));
   assert.ok(current, "the current mode is listed");
   assert.match(current, /^fix \*/);
@@ -412,7 +483,7 @@ test("a valid choice clears the count of stray answers", async () => {
   const notes = [];
   const { deps, writes } = fakeDeps();
   // Two stray answers with a real choice in between: the menu stays open and warns twice.
-  await createCommand(deps).handler("", ui([{ raw: "x" }, "Log", { raw: "y" }, "Exit"], { notes }));
+  await createCommand(deps).handler("", ui([{ raw: "x" }, "Log", { raw: "y" }, "Close"], { notes }));
   assert.deepEqual(writes, []);
   assert.equal(notes.filter((note) => /not one of the menu entries/.test(note.text)).length, 2);
   assert.equal(notes.filter((note) => /closing it/.test(note.text)).length, 0);
@@ -421,7 +492,7 @@ test("a valid choice clears the count of stray answers", async () => {
 test("an answer that is not in the menu warns and leaves the menu open", async () => {
   const notes = [];
   const { deps, writes } = fakeDeps();
-  const scripted = ui(["Exit"], { notes });
+  const scripted = ui(["Close"], { notes });
   let first = true;
   // The host answers with a string the menu never offered, then with a real entry: the menu warns
   // once and stays open instead of treating the first answer as a cancel.
